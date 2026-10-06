@@ -1,21 +1,1319 @@
-const $=s=>document.querySelector(s);const api=async(url,opt={})=>{const r=await fetch(url,{...opt,headers:{'Content-Type':'application/json',...(opt.headers||{})}});let j={};try{j=await r.json()}catch{}if(!r.ok)throw new Error(j.error||'Erro');return j};
-function msg(el,text,ok=false){el.textContent=text;el.className=ok?'ok':'err'}
-let me=null;
-for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>{for(const f of ['login','register','forgot'])$('#'+f).classList.toggle('hidden',b.dataset.tab!==f)};
-$('#login').onsubmit=async e=>{e.preventDefault();try{const f=new FormData(e.target);await api('/api/login',{method:'POST',body:JSON.stringify(Object.fromEntries(f))});await load()}catch(x){msg($('#authMsg'),x.message)}};
-$('#register').onsubmit=async e=>{e.preventDefault();try{const f=new FormData(e.target);await api('/api/register',{method:'POST',body:JSON.stringify(Object.fromEntries(f))});msg($('#authMsg'),'Conta criada. Agora entre.',true);document.querySelector('[data-tab="login"]').click()}catch(x){msg($('#authMsg'),x.message)}};
-$('#forgot').onsubmit=async e=>{e.preventDefault();try{const f=new FormData(e.target);const j=await api('/api/forgot-password',{method:'POST',body:JSON.stringify(Object.fromEntries(f))});msg($('#authMsg'),j.message,true)}catch(x){msg($('#authMsg'),x.message)}};
-$('#logout').onclick=async()=>{await api('/api/logout',{method:'POST'});location.reload()};$('#refresh').onclick=load;
-async function load(){try{const j=await api('/api/me');me=j.user;$('#auth').classList.add('hidden');$('#app').classList.remove('hidden');$('#logout').classList.remove('hidden');$('#userName').textContent=me.name;$('#userRole').textContent=me.role==='admin'?'Administrador':'Integrante';if(me.role==='admin'){['adminPoll','adminMatch','adminNotice'].forEach(id=>$('#'+id).classList.remove('hidden'))}await Promise.all([polls(),matches(),lineup(),announcements(),members()]);$('#profileForm input').value=me.name}catch{$('#auth').classList.remove('hidden');$('#app').classList.add('hidden')}}
-async function polls(){const {polls}=await api('/api/polls');$('#polls').innerHTML=polls.length?polls.map(p=>`<div class="item"><b>${esc(p.question)}</b>${p.options.map((o,i)=>`<label class="choice"><input type="${p.multiple?'checkbox':'radio'}" name="poll-${p.id}" value="${i}" ${p.hasVoted?'disabled':''}> ${esc(o)}</label>`).join('')}${p.hasVoted?'<span class="muted">Você já votou.</span>':p.closed?'<span class="muted">Encerrada.</span>':`<button onclick="vote('${p.id}',${p.multiple})">Votar</button>`} <button class="ghost" onclick="results('${p.id}')">Resultados</button>${me.role==='admin'&&!p.closed?` <button class="danger" onclick="closePoll('${p.id}')">Encerrar</button>`:''}</div>`).join(''):'<p class="muted">Nenhuma enquete ainda.</p>'}
-window.vote=async(id,multiple)=>{const a=[...document.querySelectorAll(`[name="poll-${id}"]:checked`)].map(x=>Number(x.value));try{await api('/api/polls/'+id+'/vote',{method:'POST',body:JSON.stringify({options:a})});await polls()}catch(e){alert(e.message)}};window.results=async id=>{const j=await api('/api/polls/'+id+'/results');alert(j.question+'\n\n'+j.results.map(x=>`${x.label}: ${x.count}`).join('\n')+'\n\nTotal de votos: '+j.total)};window.closePoll=async id=>{await api('/api/polls/'+id+'/close',{method:'POST'});polls()};
-$('#pollForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api('/api/polls',{method:'POST',body:JSON.stringify({question:f.get('question'),options:String(f.get('options')).split(',').map(x=>x.trim()).filter(Boolean),multiple:f.get('multiple')==='on'})});e.target.reset();polls()}catch(x){alert(x.message)}};
-async function matches(){const {matches}=await api('/api/matches');$('#matches').innerHTML=matches.length?matches.map(m=>`<div class="item"><b>${esc(m.opponent)}</b><div class="muted">${m.date}${m.time?' • '+m.time:''}${m.location?' • '+esc(m.location):''}</div><div>${esc(m.status)} ${m.result?'— '+esc(m.result):''}</div>${me.role==='admin'?`<button class="danger" onclick="delMatch('${m.id}')">Excluir</button>`:''}</div>`).join(''):'<p class="muted">Nenhuma partida cadastrada.</p>'}window.delMatch=async id=>{if(confirm('Excluir esta partida?')){await api('/api/matches/'+id,{method:'DELETE'});matches()}};
-$('#matchForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api('/api/matches',{method:'POST',body:JSON.stringify(Object.fromEntries(f))});e.target.reset();matches()}catch(x){alert(x.message)}};
-async function lineup(){const {lineup}=await api('/api/lineup');$('#lineup').innerHTML=lineup.length?lineup.map(p=>`<div class="item"><b>${esc(p.player_name)}</b> <span class="muted">${esc(p.position||'')}</span>${p.starter?' — titular':''}${p.injured?' — lesionado':''}</div>`).join(''):'<p class="muted">Escalação ainda não cadastrada.</p>'}
-async function announcements(){const {announcements}=await api('/api/announcements');$('#announcements').innerHTML=announcements.length?announcements.map(a=>`<div class="item"><b>${esc(a.title)}</b><p>${esc(a.body)}</p><span class="muted">${new Date(a.created_at).toLocaleString('pt-BR')}</span></div>`).join(''):'<p class="muted">Nenhum aviso.</p>'}
-$('#noticeForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api('/api/announcements',{method:'POST',body:JSON.stringify(Object.fromEntries(f))});e.target.reset();announcements()}catch(x){alert(x.message)}};
-async function members(){const {members}=await api('/api/members');$('#members').innerHTML=members.map(u=>`<div class="item"><b>${esc(u.name)}</b><div class="muted">${esc(u.email)} • ${u.role}</div>${me.role==='admin'&&u.id!==me.id?`<button onclick="role('${u.id}','${u.role==='admin'?'member':'admin'}')">Tornar ${u.role==='admin'?'integrante':'admin'}</button>`:''}</div>`).join('')||'<p class="muted">Nenhum membro.</p>'}window.role=async(id,role)=>{await api('/api/members/'+id+'/role',{method:'PUT',body:JSON.stringify({role})});members()};
-$('#profileForm').onsubmit=async e=>{e.preventDefault();try{const f=new FormData(e.target);const j=await api('/api/profile',{method:'PUT',body:JSON.stringify(Object.fromEntries(f))});me=j.user;$('#userName').textContent=me.name;msg($('#profileMsg'),'Nome salvo.',true)}catch(x){msg($('#profileMsg'),x.message)}};
-$('#passwordForm').onsubmit=async e=>{e.preventDefault();try{const f=new FormData(e.target);const j=await api('/api/change-password',{method:'POST',body:JSON.stringify(Object.fromEntries(f))});msg($('#profileMsg'),j.message,true);setTimeout(()=>location.reload(),1200)}catch(x){msg($('#profileMsg'),x.message)}};
-function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}load();
+const $ = selector =>
+  document.querySelector(selector);
+
+const api = async (
+  url,
+  options = {}
+) => {
+
+  const response = await fetch(
+    url,
+    {
+      ...options,
+
+      headers: {
+        'Content-Type':
+          'application/json',
+
+        ...(options.headers || {})
+      }
+    }
+  );
+
+  let json = {};
+
+  try {
+    json = await response.json();
+  } catch {}
+
+  if (!response.ok) {
+    throw new Error(
+      json.error || 'Erro'
+    );
+  }
+
+  return json;
+};
+
+function msg(
+  element,
+  text,
+  ok = false
+) {
+  element.textContent = text;
+
+  element.className =
+    ok
+      ? 'ok'
+      : 'err';
+}
+
+let me = null;
+
+
+/* =========================
+   ABAS
+========================= */
+
+for (
+  const button of
+  document.querySelectorAll(
+    '[data-tab]'
+  )
+) {
+
+  button.onclick = () => {
+
+    for (
+      const formName of
+      ['login', 'register', 'forgot']
+    ) {
+
+      $('#' + formName)
+        .classList.toggle(
+          'hidden',
+          button.dataset.tab !==
+          formName
+        );
+    }
+
+  };
+
+}
+
+
+/* =========================
+   LOGIN
+========================= */
+
+$('#login').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      const form =
+        new FormData(
+          event.target
+        );
+
+      await api(
+        '/api/login',
+        {
+          method: 'POST',
+
+          body:
+            JSON.stringify(
+              Object.fromEntries(
+                form
+              )
+            )
+        }
+      );
+
+      await load();
+
+    } catch (error) {
+
+      msg(
+        $('#authMsg'),
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   CADASTRO
+========================= */
+
+$('#register').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      const form =
+        new FormData(
+          event.target
+        );
+
+      await api(
+        '/api/register',
+        {
+          method: 'POST',
+
+          body:
+            JSON.stringify(
+              Object.fromEntries(
+                form
+              )
+            )
+        }
+      );
+
+      msg(
+        $('#authMsg'),
+        'Conta criada. Agora entre.',
+        true
+      );
+
+      document
+        .querySelector(
+          '[data-tab="login"]'
+        )
+        .click();
+
+    } catch (error) {
+
+      msg(
+        $('#authMsg'),
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   ESQUECI A SENHA
+========================= */
+
+$('#forgot').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      const form =
+        new FormData(
+          event.target
+        );
+
+      const result =
+        await api(
+          '/api/forgot-password',
+          {
+            method: 'POST',
+
+            body:
+              JSON.stringify(
+                Object.fromEntries(
+                  form
+                )
+              )
+          }
+        );
+
+      msg(
+        $('#authMsg'),
+        result.message,
+        true
+      );
+
+    } catch (error) {
+
+      msg(
+        $('#authMsg'),
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   PRIMEIRO ADMIN
+========================= */
+
+async function checkAdminSetup() {
+
+  try {
+
+    const result =
+      await api(
+        '/api/setup-admin/status'
+      );
+
+    if (
+      result.available
+    ) {
+
+      $('#setupAdmin')
+        .classList
+        .remove('hidden');
+
+    } else {
+
+      $('#setupAdmin')
+        .classList
+        .add('hidden');
+    }
+
+  } catch {
+
+    $('#setupAdmin')
+      .classList
+      .add('hidden');
+  }
+}
+
+
+$('#setupAdminForm').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    const form =
+      new FormData(
+        event.target
+      );
+
+    try {
+
+      const data =
+        await api(
+          '/api/setup-admin',
+          {
+            method: 'POST',
+
+            body:
+              JSON.stringify(
+                Object.fromEntries(
+                  form
+                )
+              )
+          }
+        );
+
+      msg(
+        $('#setupAdminMsg'),
+        data.message,
+        true
+      );
+
+      event.target.reset();
+
+      setTimeout(
+        () => {
+
+          document
+            .querySelector(
+              '[data-tab="login"]'
+            )
+            .click();
+
+        },
+        1500
+      );
+
+      await checkAdminSetup();
+
+    } catch (error) {
+
+      msg(
+        $('#setupAdminMsg'),
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   LOGOUT
+========================= */
+
+$('#logout').onclick =
+  async () => {
+
+    try {
+
+      await api(
+        '/api/logout',
+        {
+          method: 'POST'
+        }
+      );
+
+    } finally {
+
+      location.reload();
+    }
+  };
+
+
+$('#refresh').onclick =
+  load;
+
+
+/* =========================
+   CARREGAR SISTEMA
+========================= */
+
+async function load() {
+
+  try {
+
+    const result =
+      await api('/api/me');
+
+    me = result.user;
+
+    $('#auth')
+      .classList
+      .add('hidden');
+
+    $('#app')
+      .classList
+      .remove('hidden');
+
+    $('#logout')
+      .classList
+      .remove('hidden');
+
+    $('#userName')
+      .textContent =
+      me.name;
+
+    $('#userRole')
+      .textContent =
+      me.role === 'admin'
+        ? 'Administrador'
+        : 'Integrante';
+
+    /*
+      Mostra ferramentas administrativas
+      somente para admins.
+    */
+
+    if (
+      me.role === 'admin'
+    ) {
+
+      [
+        'adminPoll',
+        'adminMatch',
+        'adminNotice'
+      ].forEach(
+        elementId => {
+
+          $(
+            '#' + elementId
+          )
+            .classList
+            .remove('hidden');
+
+        }
+      );
+
+    } else {
+
+      [
+        'adminPoll',
+        'adminMatch',
+        'adminNotice'
+      ].forEach(
+        elementId => {
+
+          $(
+            '#' + elementId
+          )
+            .classList
+            .add('hidden');
+
+        }
+      );
+    }
+
+    await Promise.all([
+      polls(),
+      matches(),
+      lineup(),
+      announcements(),
+      members()
+    ]);
+
+    $('#profileForm input')
+      .value =
+      me.name;
+
+  } catch {
+
+    $('#auth')
+      .classList
+      .remove('hidden');
+
+    $('#app')
+      .classList
+      .add('hidden');
+
+    $('#logout')
+      .classList
+      .add('hidden');
+
+    await checkAdminSetup();
+  }
+}
+
+
+/* =========================
+   ENQUETES
+========================= */
+
+async function polls() {
+
+  const result =
+    await api(
+      '/api/polls'
+    );
+
+  const pollList =
+    result.polls;
+
+  $('#polls').innerHTML =
+    pollList.length
+
+      ? pollList
+          .map(poll => {
+
+            return `
+              <div class="item">
+
+                <b>
+                  ${esc(
+                    poll.question
+                  )}
+                </b>
+
+                ${poll.options
+                  .map(
+                    (option, index) => `
+                      <label class="choice">
+
+                        <input
+                          type="${
+                            poll.multiple
+                              ? 'checkbox'
+                              : 'radio'
+                          }"
+
+                          name="poll-${
+                            poll.id
+                          }"
+
+                          value="${index}"
+
+                          ${
+                            poll.hasVoted
+                              ? 'disabled'
+                              : ''
+                          }
+                        >
+
+                        ${esc(option)}
+
+                      </label>
+                    `
+                  )
+                  .join('')}
+
+                ${
+                  poll.hasVoted
+                    ? `
+                      <span class="muted">
+                        Você já votou.
+                      </span>
+                    `
+                    : poll.closed
+                    ? `
+                      <span class="muted">
+                        Encerrada.
+                      </span>
+                    `
+                    : `
+                      <button
+                        onclick="vote(
+                          '${poll.id}',
+                          ${poll.multiple}
+                        )"
+                      >
+                        Votar
+                      </button>
+                    `
+                }
+
+                <button
+                  class="ghost"
+                  onclick="results(
+                    '${poll.id}'
+                  )"
+                >
+                  Resultados
+                </button>
+
+                ${
+                  me.role === 'admin' &&
+                  !poll.closed
+                    ? `
+                      <button
+                        class="danger"
+                        onclick="closePoll(
+                          '${poll.id}'
+                        )"
+                      >
+                        Encerrar
+                      </button>
+                    `
+                    : ''
+                }
+
+              </div>
+            `;
+
+          })
+          .join('')
+
+      : `
+        <p class="muted">
+          Nenhuma enquete ainda.
+        </p>
+      `;
+}
+
+
+window.vote =
+  async (
+    id,
+    multiple
+  ) => {
+
+    const choices =
+      [
+        ...document.querySelectorAll(
+          `[name="poll-${id}"]:checked`
+        )
+      ].map(
+        input =>
+          Number(
+            input.value
+          )
+      );
+
+    try {
+
+      await api(
+        '/api/polls/' +
+        id +
+        '/vote',
+        {
+          method: 'POST',
+
+          body:
+            JSON.stringify({
+              options:
+                choices
+            })
+        }
+      );
+
+      await polls();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+window.results =
+  async id => {
+
+    try {
+
+      const result =
+        await api(
+          '/api/polls/' +
+          id +
+          '/results'
+        );
+
+      alert(
+        result.question +
+        '\n\n' +
+
+        result.results
+          .map(
+            item =>
+              `${item.label}: ${item.count}`
+          )
+          .join('\n') +
+
+        '\n\nTotal de votos: ' +
+        result.total
+      );
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+window.closePoll =
+  async id => {
+
+    try {
+
+      await api(
+        '/api/polls/' +
+        id +
+        '/close',
+        {
+          method: 'POST'
+        }
+      );
+
+      await polls();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+$('#pollForm').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    const form =
+      new FormData(
+        event.target
+      );
+
+    try {
+
+      await api(
+        '/api/polls',
+        {
+          method: 'POST',
+
+          body:
+            JSON.stringify({
+              question:
+                form.get(
+                  'question'
+                ),
+
+              options:
+                String(
+                  form.get(
+                    'options'
+                  )
+                )
+                  .split(',')
+                  .map(
+                    value =>
+                      value.trim()
+                  )
+                  .filter(Boolean),
+
+              multiple:
+                form.get(
+                  'multiple'
+                ) === 'on'
+            })
+        }
+      );
+
+      event.target.reset();
+
+      await polls();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   PARTIDAS
+========================= */
+
+async function matches() {
+
+  const result =
+    await api(
+      '/api/matches'
+    );
+
+  const list =
+    result.matches;
+
+  $('#matches').innerHTML =
+    list.length
+
+      ? list
+          .map(
+            match => `
+              <div class="item">
+
+                <b>
+                  ${esc(
+                    match.opponent
+                  )}
+                </b>
+
+                <div class="muted">
+                  ${match.date}
+
+                  ${
+                    match.time
+                      ? ' • ' +
+                        match.time
+                      : ''
+                  }
+
+                  ${
+                    match.location
+                      ? ' • ' +
+                        esc(
+                          match.location
+                        )
+                      : ''
+                  }
+                </div>
+
+                <div>
+                  ${esc(
+                    match.status
+                  )}
+
+                  ${
+                    match.result
+                      ? ' — ' +
+                        esc(
+                          match.result
+                        )
+                      : ''
+                  }
+                </div>
+
+                ${
+                  me.role === 'admin'
+                    ? `
+                      <button
+                        class="danger"
+                        onclick="delMatch(
+                          '${match.id}'
+                        )"
+                      >
+                        Excluir
+                      </button>
+                    `
+                    : ''
+                }
+
+              </div>
+            `
+          )
+          .join('')
+
+      : `
+        <p class="muted">
+          Nenhuma partida cadastrada.
+        </p>
+      `;
+}
+
+
+window.delMatch =
+  async id => {
+
+    if (
+      !confirm(
+        'Excluir esta partida?'
+      )
+    ) {
+      return;
+    }
+
+    try {
+
+      await api(
+        '/api/matches/' +
+        id,
+        {
+          method: 'DELETE'
+        }
+      );
+
+      await matches();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+$('#matchForm').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    const form =
+      new FormData(
+        event.target
+      );
+
+    try {
+
+      await api(
+        '/api/matches',
+        {
+          method: 'POST',
+
+          body:
+            JSON.stringify(
+              Object.fromEntries(
+                form
+              )
+            )
+        }
+      );
+
+      event.target.reset();
+
+      await matches();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   ESCALAÇÃO
+========================= */
+
+async function lineup() {
+
+  const result =
+    await api(
+      '/api/lineup'
+    );
+
+  const players =
+    result.lineup;
+
+  $('#lineup').innerHTML =
+    players.length
+
+      ? players
+          .map(
+            player => `
+              <div class="item">
+
+                <b>
+                  ${esc(
+                    player.player_name
+                  )}
+                </b>
+
+                <span class="muted">
+                  ${esc(
+                    player.position ||
+                    ''
+                  )}
+                </span>
+
+                ${
+                  player.starter
+                    ? ' — titular'
+                    : ''
+                }
+
+                ${
+                  player.injured
+                    ? ' — lesionado'
+                    : ''
+                }
+
+              </div>
+            `
+          )
+          .join('')
+
+      : `
+        <p class="muted">
+          Escalação ainda não cadastrada.
+        </p>
+      `;
+}
+
+
+/* =========================
+   AVISOS
+========================= */
+
+async function announcements() {
+
+  const result =
+    await api(
+      '/api/announcements'
+    );
+
+  const list =
+    result.announcements;
+
+  $('#announcements').innerHTML =
+    list.length
+
+      ? list
+          .map(
+            announcement => `
+              <div class="item">
+
+                <b>
+                  ${esc(
+                    announcement.title
+                  )}
+                </b>
+
+                <p>
+                  ${esc(
+                    announcement.body
+                  )}
+                </p>
+
+                <span class="muted">
+                  ${new Date(
+                    announcement.created_at
+                  ).toLocaleString(
+                    'pt-BR'
+                  )}
+                </span>
+
+              </div>
+            `
+          )
+          .join('')
+
+      : `
+        <p class="muted">
+          Nenhum aviso.
+        </p>
+      `;
+}
+
+
+$('#noticeForm').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    const form =
+      new FormData(
+        event.target
+      );
+
+    try {
+
+      await api(
+        '/api/announcements',
+        {
+          method: 'POST',
+
+          body:
+            JSON.stringify(
+              Object.fromEntries(
+                form
+              )
+            )
+        }
+      );
+
+      event.target.reset();
+
+      await announcements();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   MEMBROS
+========================= */
+
+async function members() {
+
+  const result =
+    await api(
+      '/api/members'
+    );
+
+  const list =
+    result.members;
+
+  $('#members').innerHTML =
+    list.length
+
+      ? list
+          .map(
+            user => `
+              <div class="item">
+
+                <b>
+                  ${esc(
+                    user.name
+                  )}
+                </b>
+
+                <div class="muted">
+
+                  ${esc(
+                    user.email
+                  )}
+
+                  •
+                  ${user.role}
+
+                </div>
+
+                ${
+                  me.role === 'admin' &&
+                  user.id !== me.id
+
+                    ? `
+                      <button
+                        onclick="changeRole(
+                          '${user.id}',
+                          '${
+                            user.role ===
+                            'admin'
+                              ? 'member'
+                              : 'admin'
+                          }'
+                        )"
+                      >
+                        Tornar ${
+                          user.role ===
+                          'admin'
+                            ? 'integrante'
+                            : 'admin'
+                        }
+                      </button>
+                    `
+
+                    : ''
+                }
+
+              </div>
+            `
+          )
+          .join('')
+
+      : `
+        <p class="muted">
+          Nenhum membro.
+        </p>
+      `;
+}
+
+
+window.changeRole =
+  async (
+    id,
+    role
+  ) => {
+
+    try {
+
+      await api(
+        '/api/members/' +
+        id +
+        '/role',
+        {
+          method: 'PUT',
+
+          body:
+            JSON.stringify({
+              role
+            })
+        }
+      );
+
+      await members();
+
+    } catch (error) {
+
+      alert(
+        error.message
+      );
+    }
+  };
+
+
+/* Mantém compatibilidade
+   com o nome antigo da função. */
+
+window.role =
+  window.changeRole;
+
+
+/* =========================
+   PERFIL
+========================= */
+
+$('#profileForm').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      const form =
+        new FormData(
+          event.target
+        );
+
+      const result =
+        await api(
+          '/api/profile',
+          {
+            method: 'PUT',
+
+            body:
+              JSON.stringify(
+                Object.fromEntries(
+                  form
+                )
+              )
+          }
+        );
+
+      me =
+        result.user;
+
+      $('#userName')
+        .textContent =
+        me.name;
+
+      msg(
+        $('#profileMsg'),
+        'Nome salvo.',
+        true
+      );
+
+    } catch (error) {
+
+      msg(
+        $('#profileMsg'),
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   ALTERAR SENHA
+========================= */
+
+$('#passwordForm').onsubmit =
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      const form =
+        new FormData(
+          event.target
+        );
+
+      const result =
+        await api(
+          '/api/change-password',
+          {
+            method: 'POST',
+
+            body:
+              JSON.stringify(
+                Object.fromEntries(
+                  form
+                )
+              )
+          }
+        );
+
+      msg(
+        $('#profileMsg'),
+        result.message,
+        true
+      );
+
+      setTimeout(
+        () => location.reload(),
+        1200
+      );
+
+    } catch (error) {
+
+      msg(
+        $('#profileMsg'),
+        error.message
+      );
+    }
+  };
+
+
+/* =========================
+   SEGURANÇA HTML
+========================= */
+
+function esc(value) {
+
+  return String(
+    value ?? ''
+  ).replace(
+    /[&<>'"]/g,
+    character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    })[character]
+  );
+}
+
+
+/* =========================
+   INÍCIO
+========================= */
+
+checkAdminSetup();
+
+load();
