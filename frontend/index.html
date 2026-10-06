@@ -1,1 +1,455 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Beiçola F.I. — Área Pessoal</title><link rel="stylesheet" href="/css/style.css"></head><body><header><div><strong>BEIÇOLA F.I.</strong><span>Área pessoal do time</span></div><button id="logout" class="ghost hidden">Sair</button></header><main><section id="auth" class="card"><h1>Área do time</h1><p>Entre na sua conta ou crie seu acesso.</p><div class="tabs"><button data-tab="login">Entrar</button><button data-tab="register">Cadastrar</button><button data-tab="forgot">Esqueci a senha</button></div><form id="login"><input name="email" type="email" placeholder="E-mail" required><input name="password" type="password" placeholder="Senha" required><button>Entrar</button></form><form id="register" class="hidden"><input name="name" placeholder="Nome" required><input name="email" type="email" placeholder="E-mail" required><input name="password" type="password" placeholder="Senha (8+ caracteres)" required><button>Criar conta</button></form><form id="forgot" class="hidden"><input name="email" type="email" placeholder="E-mail" required><button>Enviar recuperação</button></form><p id="authMsg"></p></section><section id="app" class="hidden"><div class="hero"><div><h1>Olá, <span id="userName"></span> 👋</h1><p id="userRole"></p></div><button id="refresh">Atualizar</button></div><div class="grid"><article class="card"><h2>Enquetes</h2><div id="polls"></div><div id="adminPoll" class="hidden"><h3>Nova enquete</h3><form id="pollForm"><input name="question" placeholder="Pergunta" required><input name="options" placeholder="Opções separadas por vírgula" required><label><input name="multiple" type="checkbox"> Permitir várias opções</label><button>Criar enquete</button></form></div></article><article class="card"><h2>Partidas</h2><div id="matches"></div><div id="adminMatch" class="hidden"><h3>Adicionar partida</h3><form id="matchForm"><input name="opponent" placeholder="Adversário" required><input name="date" type="date" required><input name="time" type="time"><input name="location" placeholder="Local"><button>Adicionar</button></form></div></article><article class="card"><h2>Escalação</h2><div id="lineup"></div></article><article class="card"><h2>Avisos</h2><div id="announcements"></div><div id="adminNotice" class="hidden"><h3>Novo aviso</h3><form id="noticeForm"><input name="title" placeholder="Título" required><textarea name="body" placeholder="Aviso" required></textarea><button>Publicar</button></form></div></article><article class="card"><h2>Membros</h2><div id="members"></div></article><article class="card"><h2>Minha conta</h2><form id="profileForm"><input name="name" placeholder="Nome" required><button>Salvar nome</button></form><form id="passwordForm"><input name="currentPassword" type="password" placeholder="Senha atual" required><input name="newPassword" type="password" placeholder="Nova senha" required><button>Alterar senha</button></form><p id="profileMsg"></p></article></div></section></main><script src="/js/app.js"></script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <title>Beiçola F.I. — Área Pessoal</title>
+
+  <link
+    rel="stylesheet"
+    href="/css/style.css"
+  >
+</head>
+
+<body>
+
+<header>
+
+  <div>
+    <strong>BEIÇOLA F.I.</strong>
+    <span>Área pessoal do time</span>
+  </div>
+
+  <button
+    id="logout"
+    class="ghost hidden"
+  >
+    Sair
+  </button>
+
+</header>
+
+<main>
+
+  <!-- LOGIN / CADASTRO -->
+
+  <section
+    id="auth"
+    class="card"
+  >
+
+    <h1>Área do time</h1>
+
+    <p>
+      Entre na sua conta ou crie seu acesso.
+    </p>
+
+    <div class="tabs">
+
+      <button data-tab="login">
+        Entrar
+      </button>
+
+      <button data-tab="register">
+        Cadastrar
+      </button>
+
+      <button data-tab="forgot">
+        Esqueci a senha
+      </button>
+
+    </div>
+
+    <!-- LOGIN -->
+
+    <form id="login">
+
+      <input
+        name="email"
+        type="email"
+        placeholder="E-mail"
+        required
+      >
+
+      <input
+        name="password"
+        type="password"
+        placeholder="Senha"
+        required
+      >
+
+      <button>
+        Entrar
+      </button>
+
+    </form>
+
+    <!-- CADASTRO -->
+
+    <form
+      id="register"
+      class="hidden"
+    >
+
+      <input
+        name="name"
+        placeholder="Nome"
+        required
+      >
+
+      <input
+        name="email"
+        type="email"
+        placeholder="E-mail"
+        required
+      >
+
+      <input
+        name="password"
+        type="password"
+        placeholder="Senha (8+ caracteres)"
+        required
+      >
+
+      <button>
+        Criar conta
+      </button>
+
+    </form>
+
+    <!-- RECUPERAÇÃO -->
+
+    <form
+      id="forgot"
+      class="hidden"
+    >
+
+      <input
+        name="email"
+        type="email"
+        placeholder="E-mail"
+        required
+      >
+
+      <button>
+        Enviar recuperação
+      </button>
+
+    </form>
+
+    <p id="authMsg"></p>
+
+    <!-- PRIMEIRO ADMIN -->
+
+    <div
+      id="setupAdmin"
+      class="hidden"
+    >
+
+      <hr>
+
+      <h2>
+        Configuração inicial
+      </h2>
+
+      <p class="muted">
+        Ainda não existe um administrador.
+        Se você é responsável pelo time,
+        pode criar o primeiro administrador
+        usando a chave secreta configurada
+        no servidor.
+      </p>
+
+      <form id="setupAdminForm">
+
+        <input
+          name="name"
+          placeholder="Nome do administrador"
+          required
+        >
+
+        <input
+          name="email"
+          type="email"
+          placeholder="E-mail do administrador"
+          required
+        >
+
+        <input
+          name="password"
+          type="password"
+          placeholder="Senha do administrador (8+ caracteres)"
+          required
+        >
+
+        <input
+          name="setupKey"
+          type="password"
+          placeholder="Chave secreta de configuração"
+          required
+        >
+
+        <button>
+          Criar administrador
+        </button>
+
+      </form>
+
+      <p
+        id="setupAdminMsg"
+      ></p>
+
+    </div>
+
+  </section>
+
+  <!-- APLICAÇÃO -->
+
+  <section
+    id="app"
+    class="hidden"
+  >
+
+    <div class="hero">
+
+      <div>
+
+        <h1>
+          Olá,
+          <span id="userName"></span>
+          👋
+        </h1>
+
+        <p id="userRole"></p>
+
+      </div>
+
+      <button id="refresh">
+        Atualizar
+      </button>
+
+    </div>
+
+    <div class="grid">
+
+      <!-- ENQUETES -->
+
+      <article class="card">
+
+        <h2>Enquetes</h2>
+
+        <div id="polls"></div>
+
+        <div
+          id="adminPoll"
+          class="hidden"
+        >
+
+          <h3>
+            Nova enquete
+          </h3>
+
+          <form id="pollForm">
+
+            <input
+              name="question"
+              placeholder="Pergunta"
+              required
+            >
+
+            <input
+              name="options"
+              placeholder="Opções separadas por vírgula"
+              required
+            >
+
+            <label>
+              <input
+                name="multiple"
+                type="checkbox"
+              >
+
+              Permitir várias opções
+            </label>
+
+            <button>
+              Criar enquete
+            </button>
+
+          </form>
+
+        </div>
+
+      </article>
+
+      <!-- PARTIDAS -->
+
+      <article class="card">
+
+        <h2>Partidas</h2>
+
+        <div id="matches"></div>
+
+        <div
+          id="adminMatch"
+          class="hidden"
+        >
+
+          <h3>
+            Adicionar partida
+          </h3>
+
+          <form id="matchForm">
+
+            <input
+              name="opponent"
+              placeholder="Adversário"
+              required
+            >
+
+            <input
+              name="date"
+              type="date"
+              required
+            >
+
+            <input
+              name="time"
+              type="time"
+            >
+
+            <input
+              name="location"
+              placeholder="Local"
+            >
+
+            <button>
+              Adicionar
+            </button>
+
+          </form>
+
+        </div>
+
+      </article>
+
+      <!-- ESCALAÇÃO -->
+
+      <article class="card">
+
+        <h2>Escalação</h2>
+
+        <div id="lineup"></div>
+
+      </article>
+
+      <!-- AVISOS -->
+
+      <article class="card">
+
+        <h2>Avisos</h2>
+
+        <div id="announcements"></div>
+
+        <div
+          id="adminNotice"
+          class="hidden"
+        >
+
+          <h3>
+            Novo aviso
+          </h3>
+
+          <form id="noticeForm">
+
+            <input
+              name="title"
+              placeholder="Título"
+              required
+            >
+
+            <textarea
+              name="body"
+              placeholder="Aviso"
+              required
+            ></textarea>
+
+            <button>
+              Publicar
+            </button>
+
+          </form>
+
+        </div>
+
+      </article>
+
+      <!-- MEMBROS -->
+
+      <article class="card">
+
+        <h2>Membros</h2>
+
+        <div id="members"></div>
+
+      </article>
+
+      <!-- CONTA -->
+
+      <article class="card">
+
+        <h2>Minha conta</h2>
+
+        <form id="profileForm">
+
+          <input
+            name="name"
+            placeholder="Nome"
+            required
+          >
+
+          <button>
+            Salvar nome
+          </button>
+
+        </form>
+
+        <form id="passwordForm">
+
+          <input
+            name="currentPassword"
+            type="password"
+            placeholder="Senha atual"
+            required
+          >
+
+          <input
+            name="newPassword"
+            type="password"
+            placeholder="Nova senha"
+            required
+          >
+
+          <button>
+            Alterar senha
+          </button>
+
+        </form>
+
+        <p id="profileMsg"></p>
+
+      </article>
+
+    </div>
+
+  </section>
+
+</main>
+
+<script src="/js/app.js"></script>
+
+</body>
+
+</html>
