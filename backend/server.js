@@ -1,297 +1,25 @@
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const express = require('express');
-const cookieParser = require('cookie-parser');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
-const initSqlJs = require('sql.js');
-
-require('dotenv').config({
-  path: path.join(__dirname, '.env')
-});
-
-const PORT = Number(process.env.PORT || 3000);
-
-const DATA_DIR = path.join(__dirname, 'data');
-const DB_FILE = path.join(DATA_DIR, 'beicola.sqlite');
-const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
-
-fs.mkdirSync(DATA_DIR, { recursive: true });
-
-let SQL;
-let db;
-
-function saveDb() {
-  fs.writeFileSync(DB_FILE, Buffer.from(db.export()));
-}
-
-function paramsObject(params) {
-  const out = {};
-
-  for (const [key, value] of Object.entries(params || {})) {
-    out[
-      key.startsWith(':') ||
-      key.startsWith('$') ||
-      key.startsWith('@')
-        ? key
-        : ':' + key
-    ] = value;
-  }
-
-  return out;
-}
-
-function run(sql, params = {}) {
-  const stmt = db.prepare(sql);
-  stmt.bind(paramsObject(params));
-  stmt.step();
-  stmt.free();
-  saveDb();
-}
-
-function get(sql, params = {}) {
-  const stmt = db.prepare(sql);
-  stmt.bind(paramsObject(params));
-
-  const row = stmt.step()
-    ? stmt.getAsObject()
-    : null;
-
-  stmt.free();
-
-  return row;
-}
-
-function all(sql, params = {}) {
-  const stmt = db.prepare(sql);
-  stmt.bind(paramsObject(params));
-
-  const rows = [];
-
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject());
-  }
-
-  stmt.free();
-
-  return rows;
-}
-
-function scalar(sql, params = {}) {
-  const row = get(sql, params);
-  return row ? Object.values(row)[0] : undefined;
-}
-
-function now() {
-  return new Date().toISOString();
-}
-
-function id(bytes = 24) {
-  return crypto.randomBytes(bytes).toString('hex');
-}
-
-function hash(value) {
-  return crypto
-    .createHash('sha256')
-    .update(value)
-    .digest('hex');
-}
-
-function publicUser(user) {
-  if (!user) return null;
-
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    created_at: user.created_at
-  };
-}
-
-function validEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function adminCount() {
-  return Number(
-    scalar("SELECT COUNT(*) FROM users WHERE role='admin'") || 0
-  );
-}
-
-function setupAdminKeyValid(value) {
-  const configured = String(
-    process.env.ADMIN_SETUP_KEY || ''
-  );
-
-  const provided = String(value || '');
-
-  if (!configured || !provided) {
-    return false;
-  }
-
-  const a = Buffer.from(configured);
-  const b = Buffer.from(provided);
-
-  if (a.length !== b.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(a, b);
-}
-
-function cookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 1000 * 60 * 60 * 24 * 7
-  };
-}
-
-function transporter() {
-  if (
-    !process.env.SMTP_HOST ||
-    !process.env.SMTP_USER ||
-    !process.env.SMTP_PASS
-  ) {
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE) === 'true',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
-  });
-}
-
-async function init() {
-  SQL = await initSqlJs({
-    locateFile: file =>
-      path.join(
-        __dirname,
-        'node_modules',
-        'sql.js',
-        'dist',
-        file
-      )
-  });
-
-  if (fs.existsSync(DB_FILE)) {
-    db = new SQL.Database(
-      fs.readFileSync(DB_FILE)
-    );
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run(`
-    PRAGMA foreign_keys=ON;
-
-    CREATE TABLE IF NOT EXISTS users(
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'member',
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions(
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS password_resets(
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      token_hash TEXT NOT NULL UNIQUE,
-      expires_at TEXT NOT NULL,
-      used INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS polls(
-      id TEXT PRIMARY KEY,
-      question TEXT NOT NULL,
-      options_json TEXT NOT NULL,
-      multiple INTEGER NOT NULL DEFAULT 0,
-      closes_at TEXT,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      closed INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY(created_by)
-        REFERENCES users(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS votes(
-      id TEXT PRIMARY KEY,
-      poll_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      option_indexes_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      UNIQUE(poll_id,user_id),
-      FOREIGN KEY(poll_id)
-        REFERENCES polls(id)
-        ON DELETE CASCADE,
-      FOREIGN KEY(user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS matches(
-      id TEXT PRIMARY KEY,
-      opponent TEXT NOT NULL,
-      date TEXT NOT NULL,
-      time TEXT,
-      location TEXT,
-      result TEXT,
-      status TEXT NOT NULL DEFAULT 'agendada',
-      notes TEXT,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS announcements(
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(created_by)
-        REFERENCES users(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS lineup(
-      id TEXT PRIMARY KEY,
-      player_name TEXT NOT NULL,
-      position TEXT,
-      starter INTEGER NOT NULL DEFAULT 0,
-      injured INTEGER NOT NULL DEFAULT 0,
-      number TEXT,
-      notes TEXT,
-      updated_at TEXT NOT NULL
-    );
-  `);
-
-  saveDb();
-}
+const express = require("express");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const cookieParser = require("cookie-parser");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const nodemailer = require("nodemailer");
+const initSqlJs = require("sql.js");
+require("dotenv").config();
 
 const app = express();
+
+const PORT = Number(process.env.PORT || 3000);
+const FRONTEND_URL = (process.env.FRONTEND_URL || "").replace(/\/$/, "");
+
+const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "beicola.sqlite");
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
 
 app.use(
   helmet({
@@ -299,1721 +27,1930 @@ app.use(
   })
 );
 
-app.use(
-  express.json({
-    limit: '1mb'
-  })
-);
-
+app.use(express.json({ limit: "200kb" }));
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 300,
-    standardHeaders: true,
-    legacyHeaders: false
-  })
-);
+/* =========================================================
+   BANCO DE DADOS
+========================================================= */
 
-app.use(express.static(FRONTEND_DIR));
+let db;
 
-/*
-  RATE LIMIT ESPECÍFICO PARA A CONFIGURAÇÃO
-  DO PRIMEIRO ADMINISTRADOR.
-*/
-const setupAdminLimiter = rateLimit({
+async function initDatabase() {
+  const SQL = await initSqlJs({
+    locateFile: (file) =>
+      path.join(__dirname, "node_modules", "sql.js", "dist", file)
+  });
+
+  if (fs.existsSync(DB_FILE)) {
+    const file = fs.readFileSync(DB_FILE);
+    db = new SQL.Database(file);
+  } else {
+    db = new SQL.Database();
+  }
+
+  db.run(`
+    PRAGMA foreign_keys = ON;
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS polls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      question TEXT NOT NULL,
+      options_json TEXT NOT NULL,
+      multiple_choice INTEGER NOT NULL DEFAULT 0,
+      closes_at TEXT,
+      created_by INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      poll_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      option_index INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS matches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      opponent TEXT NOT NULL,
+      match_date TEXT NOT NULL,
+      location TEXT,
+      result TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS announcements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_by INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS lineup (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_name TEXT NOT NULL,
+      position TEXT,
+      status TEXT DEFAULT 'reserva',
+      number TEXT,
+      notes TEXT
+    );
+  `);
+
+  saveDb();
+}
+
+function saveDb() {
+  const data = db.export();
+  fs.writeFileSync(DB_FILE, Buffer.from(data));
+}
+
+/* =========================================================
+   E-MAIL
+========================================================= */
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: process.env.SMTP_SECURE === "true",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+});
+
+async function enviarEmailRecuperacao(email, token) {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error("SMTP não está configurado.");
+  }
+
+  const baseUrl =
+    FRONTEND_URL ||
+    `http://localhost:${PORT}`;
+
+  const link =
+    `${baseUrl}/pages/reset-password.html?token=` +
+    encodeURIComponent(token);
+
+  await transporter.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to: email,
+    subject: "Recuperação de senha — Beiçola F.I.",
+    text:
+      `Olá!\n\n` +
+      `Recebemos uma solicitação para redefinir sua senha do Beiçola F.I.\n\n` +
+      `Acesse o link abaixo para criar uma nova senha:\n\n` +
+      `${link}\n\n` +
+      `Este link é temporário e pode ser usado apenas uma vez.\n\n` +
+      `Se você não solicitou a recuperação da senha, ignore este e-mail.\n\n` +
+      `Beiçola F.I.`
+  });
+}
+
+/* =========================================================
+   RATE LIMITS
+========================================================= */
+
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error:
-      'Muitas tentativas. Aguarde alguns minutos e tente novamente.'
+    error: "Muitas tentativas. Aguarde alguns minutos e tente novamente."
   }
 });
 
-function auth(req, res, next) {
-  const sessionId =
-    req.cookies.beicola_session;
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Muitas tentativas de cadastro. Aguarde alguns minutos."
+  }
+});
 
-  if (!sessionId) {
-    return res
-      .status(401)
-      .json({
-        error: 'Não autenticado.'
-      });
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Muitas solicitações. Aguarde alguns minutos."
+  }
+});
+
+const setupAdminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Muitas tentativas de configuração."
+  }
+});
+
+/* =========================================================
+   FUNÇÕES AUXILIARES
+========================================================= */
+
+function getUserById(id) {
+  const result = db.exec(
+    `
+      SELECT id, name, email, role, created_at
+      FROM users
+      WHERE id = ?
+    `,
+    [id]
+  );
+
+  if (!result.length || !result[0].values.length) {
+    return null;
   }
 
-  const session = get(
+  return rowToObject(result[0]);
+}
+
+function getUserByEmail(email) {
+  const result = db.exec(
     `
       SELECT *
-      FROM sessions
-      WHERE id=:id
-      AND expires_at>:now
+      FROM users
+      WHERE LOWER(email) = LOWER(?)
     `,
-    {
-      id: sessionId,
-      now: now()
-    }
+    [email]
   );
 
-  if (!session) {
-    res.clearCookie(
-      'beicola_session'
+  if (!result.length || !result[0].values.length) {
+    return null;
+  }
+
+  return rowToObject(result[0]);
+}
+
+function rowToObject(result) {
+  const columns = result.columns;
+  const values = result.values[0];
+
+  const obj = {};
+
+  columns.forEach((column, index) => {
+    obj[column] = values[index];
+  });
+
+  return obj;
+}
+
+function getRows(sql, params = []) {
+  const result = db.exec(sql, params);
+
+  if (!result.length) {
+    return [];
+  }
+
+  const columns = result[0].columns;
+
+  return result[0].values.map((values) => {
+    const obj = {};
+
+    columns.forEach((column, index) => {
+      obj[column] = values[index];
+    });
+
+    return obj;
+  });
+}
+
+function getOne(sql, params = []) {
+  const rows = getRows(sql, params);
+  return rows.length ? rows[0] : null;
+}
+
+function randomToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function hashToken(token) {
+  return crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+}
+
+function adminCount() {
+  const row = getOne(
+    `SELECT COUNT(*) AS count FROM users WHERE role = 'admin'`
+  );
+
+  return Number(row?.count || 0);
+}
+
+function setupAdminKeyValid(key) {
+  const configuredKey = process.env.ADMIN_SETUP_KEY;
+
+  if (!configuredKey) {
+    return false;
+  }
+
+  if (!key || typeof key !== "string") {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(key),
+    Buffer.from(configuredKey)
+  );
+}
+
+/* =========================================================
+   AUTENTICAÇÃO
+========================================================= */
+
+async function authMiddleware(req, res, next) {
+  try {
+    const sessionId = req.cookies.beicola_session;
+
+    if (!sessionId) {
+      req.user = null;
+      return next();
+    }
+
+    const session = getOne(
+      `
+        SELECT
+          s.id,
+          s.user_id,
+          s.expires_at,
+          u.name,
+          u.email,
+          u.role
+        FROM sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.id = ?
+      `,
+      [sessionId]
     );
 
-    return res
-      .status(401)
-      .json({
-        error: 'Sessão expirada.'
-      });
-  }
-
-  const user = get(
-    `
-      SELECT
-        id,
-        name,
-        email,
-        role,
-        created_at
-      FROM users
-      WHERE id=:id
-    `,
-    {
-      id: session.user_id
+    if (!session) {
+      req.user = null;
+      return next();
     }
-  );
 
-  if (!user) {
-    return res
-      .status(401)
-      .json({
-        error: 'Usuário não encontrado.'
-      });
+    if (Number(session.expires_at) < Date.now()) {
+      db.run(`DELETE FROM sessions WHERE id = ?`, [sessionId]);
+      saveDb();
+
+      res.clearCookie("beicola_session");
+      req.user = null;
+
+      return next();
+    }
+
+    req.user = {
+      id: session.user_id,
+      name: session.name,
+      email: session.email,
+      role: session.role
+    };
+
+    next();
+  } catch (error) {
+    console.error("Erro na autenticação:", error);
+    req.user = null;
+    next();
   }
+}
 
-  req.user = user;
+function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: "Você precisa estar logado."
+    });
+  }
 
   next();
 }
 
-function admin(req, res, next) {
-  if (req.user.role !== 'admin') {
-    return res
-      .status(403)
-      .json({
-        error:
-          'Acesso de administrador necessário.'
-      });
+function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: "Você precisa estar logado."
+    });
+  }
+
+  if (req.user.role !== "admin") {
+    return res.status(403).json({
+      error: "Acesso permitido apenas para administradores."
+    });
   }
 
   next();
 }
 
-/* =========================
-   HEALTH
-========================= */
+app.use(authMiddleware);
 
-app.get('/api/health', (req, res) => {
+/* =========================================================
+   API — STATUS
+========================================================= */
+
+app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
-    node: process.version,
-    database: 'SQLite via sql.js',
-    setupAdminAvailable:
-      adminCount() === 0 &&
-      !!process.env.ADMIN_SETUP_KEY
+    service: "Beiçola F.I."
   });
 });
 
-/* =========================
-   PRIMEIRO ADMIN
-========================= */
+/* =========================================================
+   API — USUÁRIO ATUAL
+========================================================= */
 
-app.get(
-  '/api/setup-admin/status',
-  (req, res) => {
-    res.json({
-      available:
-        adminCount() === 0 &&
-        !!process.env.ADMIN_SETUP_KEY
+app.get("/api/me", (req, res) => {
+  if (!req.user) {
+    return res.json({
+      authenticated: false
     });
   }
-);
+
+  res.json({
+    authenticated: true,
+    user: req.user
+  });
+});
+
+/* =========================================================
+   API — CADASTRO
+========================================================= */
+
+app.post("/api/register", registerLimiter, async (req, res) => {
+  try {
+    const name = String(req.body.name || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        error: "Preencha nome, e-mail e senha."
+      });
+    }
+
+    if (name.length < 2) {
+      return res.status(400).json({
+        error: "Digite um nome válido."
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: "A senha deve ter pelo menos 8 caracteres."
+      });
+    }
+
+    const existing = getUserByEmail(email);
+
+    if (existing) {
+      return res.status(409).json({
+        error: "Este e-mail já está cadastrado."
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    db.run(
+      `
+        INSERT INTO users
+        (name, email, password_hash, role)
+        VALUES (?, ?, ?, 'member')
+      `,
+      [name, email, passwordHash]
+    );
+
+    saveDb();
+
+    res.status(201).json({
+      message: "Conta criada com sucesso."
+    });
+  } catch (error) {
+    console.error("Erro no cadastro:", error);
+
+    res.status(500).json({
+      error: "Não foi possível criar a conta."
+    });
+  }
+});
+
+/* =========================================================
+   API — LOGIN
+========================================================= */
+
+app.post("/api/login", loginLimiter, async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
+    if (!email || !password) {
+      return res.status(400).json({
+        error: "Informe e-mail e senha."
+      });
+    }
+
+    const user = getUserByEmail(email);
+
+    if (!user) {
+      return res.status(401).json({
+        error: "E-mail ou senha incorretos."
+      });
+    }
+
+    const validPassword = await bcrypt.compare(
+      password,
+      user.password_hash
+    );
+
+    if (!validPassword) {
+      return res.status(401).json({
+        error: "E-mail ou senha incorretos."
+      });
+    }
+
+    const sessionId = randomToken(32);
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+    db.run(
+      `
+        INSERT INTO sessions
+        (id, user_id, expires_at)
+        VALUES (?, ?, ?)
+      `,
+      [sessionId, user.id, expiresAt]
+    );
+
+    saveDb();
+
+    res.cookie("beicola_session", sessionId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/"
+    });
+
+    res.json({
+      message: "Login realizado com sucesso.",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error("Erro no login:", error);
+
+    res.status(500).json({
+      error: "Não foi possível realizar o login."
+    });
+  }
+});
+
+/* =========================================================
+   API — LOGOUT
+========================================================= */
+
+app.post("/api/logout", requireAuth, (req, res) => {
+  const sessionId = req.cookies.beicola_session;
+
+  if (sessionId) {
+    db.run(
+      `DELETE FROM sessions WHERE id = ?`,
+      [sessionId]
+    );
+
+    saveDb();
+  }
+
+  res.clearCookie("beicola_session");
+
+  res.json({
+    message: "Logout realizado com sucesso."
+  });
+});
+
+/* =========================================================
+   API — CONFIGURAÇÃO DO PRIMEIRO ADMIN
+========================================================= */
+
+app.get("/api/setup-admin/status", (req, res) => {
+  res.json({
+    available: adminCount() === 0 && Boolean(process.env.ADMIN_SETUP_KEY)
+  });
+});
 
 app.post(
-  '/api/setup-admin',
+  "/api/setup-admin",
   setupAdminLimiter,
   async (req, res) => {
     try {
-      /*
-        Se já existe administrador,
-        esta função fica bloqueada.
-      */
       if (adminCount() > 0) {
-        return res
-          .status(409)
-          .json({
-            error:
-              'A configuração do primeiro administrador já foi concluída.'
-          });
+        return res.status(403).json({
+          error: "A configuração inicial já foi concluída."
+        });
       }
 
-      if (!process.env.ADMIN_SETUP_KEY) {
-        return res
-          .status(503)
-          .json({
-            error:
-              'A chave de configuração do administrador ainda não foi configurada no servidor.'
-          });
+      const setupKey = String(req.body.key || "");
+      const name = String(req.body.name || "").trim();
+      const email = String(req.body.email || "")
+        .trim()
+        .toLowerCase();
+      const password = String(req.body.password || "");
+
+      if (!setupAdminKeyValid(setupKey)) {
+        return res.status(403).json({
+          error: "Chave de configuração inválida."
+        });
       }
 
-      if (
-        !setupAdminKeyValid(
-          req.body?.setupKey
-        )
-      ) {
-        return res
-          .status(403)
-          .json({
-            error:
-              'Chave de configuração inválida.'
-          });
+      if (!name || !email || !password) {
+        return res.status(400).json({
+          error: "Preencha todos os campos."
+        });
       }
 
-      const name =
-        String(
-          req.body?.name || ''
-        ).trim();
-
-      const email =
-        String(
-          req.body?.email || ''
-        )
-          .toLowerCase()
-          .trim();
-
-      const password =
-        String(
-          req.body?.password || ''
-        );
-
-      if (
-        name.length < 2 ||
-        !validEmail(email) ||
-        password.length < 8
-      ) {
-        return res
-          .status(400)
-          .json({
-            error:
-              'Nome, e-mail válido e senha de pelo menos 8 caracteres são necessários.'
-          });
+      if (password.length < 8) {
+        return res.status(400).json({
+          error: "A senha deve ter pelo menos 8 caracteres."
+        });
       }
 
-      const existing = get(
-        `
-          SELECT id
-          FROM users
-          WHERE email=:email
-        `,
-        {
-          email
-        }
-      );
+      const existing = getUserByEmail(email);
 
       if (existing) {
-        return res
-          .status(409)
-          .json({
-            error:
-              'Este e-mail já está cadastrado. Entre normalmente.'
-          });
+        return res.status(409).json({
+          error: "Este e-mail já está cadastrado."
+        });
       }
 
-      const user = {
-        id: id(),
-        name,
-        email,
-        password_hash:
-          await bcrypt.hash(
-            password,
-            12
-          ),
-        role: 'admin',
-        created_at: now()
-      };
+      const passwordHash = await bcrypt.hash(password, 12);
 
-      run(
+      db.run(
         `
-          INSERT INTO users(
-            id,
-            name,
-            email,
-            password_hash,
-            role,
-            created_at
-          )
-          VALUES(
-            :id,
-            :name,
-            :email,
-            :password_hash,
-            :role,
-            :created_at
-          )
+          INSERT INTO users
+          (name, email, password_hash, role)
+          VALUES (?, ?, ?, 'admin')
         `,
-        user
+        [name, email, passwordHash]
       );
 
-      res
-        .status(201)
-        .json({
-          message:
-            'Administrador criado com sucesso. Agora entre normalmente.',
-          user: publicUser(user)
-        });
+      saveDb();
 
+      res.status(201).json({
+        message: "Administrador criado com sucesso."
+      });
+    } catch (error) {
+      console.error("Erro ao criar administrador:", error);
+
+      res.status(500).json({
+        error: "Não foi possível criar o administrador."
+      });
+    }
+  }
+);
+
+/* =========================================================
+   API — RECUPERAÇÃO DE SENHA
+========================================================= */
+
+app.post(
+  "/api/forgot-password",
+  forgotPasswordLimiter,
+  async (req, res) => {
+    try {
+      const email = String(req.body.email || "")
+        .trim()
+        .toLowerCase();
+
+      if (!email) {
+        return res.status(400).json({
+          error: "Informe seu e-mail."
+        });
+      }
+
+      const user = getUserByEmail(email);
+
+      /*
+       * Por segurança, não revelamos se o e-mail
+       * existe ou não no sistema.
+       */
+      const genericResponse = {
+        message:
+          "Se o e-mail estiver cadastrado, você receberá as instruções para recuperar sua senha."
+      };
+
+      if (!user) {
+        return res.json(genericResponse);
+      }
+
+      /*
+       * Remove tokens antigos desse usuário.
+       */
+      db.run(
+        `
+          DELETE FROM password_resets
+          WHERE user_id = ?
+        `,
+        [user.id]
+      );
+
+      const token = randomToken(32);
+      const tokenHash = hashToken(token);
+
+      /*
+       * Token válido por 30 minutos.
+       */
+      const expiresAt =
+        Date.now() + 30 * 60 * 1000;
+
+      db.run(
+        `
+          INSERT INTO password_resets
+          (user_id, token_hash, expires_at, used)
+          VALUES (?, ?, ?, 0)
+        `,
+        [
+          user.id,
+          tokenHash,
+          expiresAt
+        ]
+      );
+
+      saveDb();
+
+      await enviarEmailRecuperacao(
+        user.email,
+        token
+      );
+
+      res.json(genericResponse);
     } catch (error) {
       console.error(
-        'Erro setup-admin:',
+        "Erro na recuperação de senha:",
         error
       );
 
-      res
-        .status(500)
-        .json({
-          error:
-            'Não foi possível criar o administrador.'
-        });
+      res.status(500).json({
+        error:
+          "Não foi possível enviar o e-mail de recuperação."
+      });
     }
   }
 );
 
-/* =========================
-   CONTAS
-========================= */
+/* =========================================================
+   API — RESET DA SENHA ATRAVÉS DO TOKEN
+========================================================= */
 
-app.post(
-  '/api/register',
-  async (req, res) => {
-    try {
-      const {
-        name,
-        email,
-        password
-      } = req.body || {};
+app.post("/api/reset-password", async (req, res) => {
+  try {
+    const token = String(req.body.token || "");
+    const password = String(req.body.password || "");
 
-      if (
-        !name ||
-        name.trim().length < 2 ||
-        !validEmail(email) ||
-        !password ||
-        password.length < 8
-      ) {
-        return res
-          .status(400)
-          .json({
-            error:
-              'Nome, e-mail válido e senha de pelo menos 8 caracteres são necessários.'
-          });
-      }
-
-      const normalizedEmail =
-        email.toLowerCase().trim();
-
-      const exists = get(
-        `
-          SELECT id
-          FROM users
-          WHERE email=:email
-        `,
-        {
-          email: normalizedEmail
-        }
-      );
-
-      if (exists) {
-        return res
-          .status(409)
-          .json({
-            error:
-              'Este e-mail já está cadastrado.'
-          });
-      }
-
-      const user = {
-        id: id(),
-        name: name.trim(),
-        email: normalizedEmail,
-        password_hash:
-          await bcrypt.hash(
-            password,
-            12
-          ),
-        role: 'member',
-        created_at: now()
-      };
-
-      run(
-        `
-          INSERT INTO users(
-            id,
-            name,
-            email,
-            password_hash,
-            role,
-            created_at
-          )
-          VALUES(
-            :id,
-            :name,
-            :email,
-            :password_hash,
-            :role,
-            :created_at
-          )
-        `,
-        user
-      );
-
-      res
-        .status(201)
-        .json({
-          user: publicUser(user)
-        });
-
-    } catch (error) {
-      console.error(error);
-
-      res
-        .status(500)
-        .json({
-          error:
-            'Erro ao cadastrar.'
-        });
-    }
-  }
-);
-
-app.post(
-  '/api/login',
-  async (req, res) => {
-    const {
-      email,
-      password
-    } = req.body || {};
-
-    const user = get(
-      `
-        SELECT *
-        FROM users
-        WHERE email=:email
-      `,
-      {
-        email:
-          String(
-            email || ''
-          )
-            .toLowerCase()
-            .trim()
-      }
-    );
-
-    if (
-      !user ||
-      !(await bcrypt.compare(
-        String(password || ''),
-        user.password_hash
-      ))
-    ) {
-      return res
-        .status(401)
-        .json({
-          error:
-            'E-mail ou senha incorretos.'
-        });
+    if (!token || !password) {
+      return res.status(400).json({
+        error: "Token e nova senha são obrigatórios."
+      });
     }
 
-    const sessionId = id(32);
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: "A senha deve ter pelo menos 8 caracteres."
+      });
+    }
 
-    run(
+    const tokenHash = hashToken(token);
+
+    const reset = getOne(
       `
-        INSERT INTO sessions(
+        SELECT
           id,
           user_id,
           expires_at,
-          created_at
-        )
-        VALUES(
-          :id,
-          :user_id,
-          :expires_at,
-          :created_at
-        )
-      `,
-      {
-        id: sessionId,
-        user_id: user.id,
-        expires_at:
-          new Date(
-            Date.now() +
-            7 * 864e5
-          ).toISOString(),
-        created_at: now()
-      }
-    );
-
-    res
-      .cookie(
-        'beicola_session',
-        sessionId,
-        cookieOptions()
-      )
-      .json({
-        user: publicUser(user)
-      });
-  }
-);
-
-app.post(
-  '/api/logout',
-  auth,
-  (req, res) => {
-    run(
-      `
-        DELETE FROM sessions
-        WHERE id=:id
-      `,
-      {
-        id:
-          req.cookies
-            .beicola_session
-      }
-    );
-
-    res.clearCookie(
-      'beicola_session'
-    );
-
-    res.json({
-      ok: true
-    });
-  }
-);
-
-app.get(
-  '/api/me',
-  auth,
-  (req, res) => {
-    res.json({
-      user: req.user
-    });
-  }
-);
-
-/* =========================
-   SENHA
-========================= */
-
-app.post(
-  '/api/change-password',
-  auth,
-  async (req, res) => {
-    const {
-      currentPassword,
-      newPassword
-    } = req.body || {};
-
-    const user = get(
-      `
-        SELECT *
-        FROM users
-        WHERE id=:id
-      `,
-      {
-        id: req.user.id
-      }
-    );
-
-    if (
-      !await bcrypt.compare(
-        String(
-          currentPassword || ''
-        ),
-        user.password_hash
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Senha atual incorreta.'
-        });
-    }
-
-    if (
-      !newPassword ||
-      newPassword.length < 8
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'A nova senha precisa ter pelo menos 8 caracteres.'
-        });
-    }
-
-    run(
-      `
-        UPDATE users
-        SET password_hash=:p
-        WHERE id=:id
-      `,
-      {
-        p:
-          await bcrypt.hash(
-            newPassword,
-            12
-          ),
-        id: req.user.id
-      }
-    );
-
-    run(
-      `
-        DELETE FROM sessions
-        WHERE user_id=:id
-      `,
-      {
-        id: req.user.id
-      }
-    );
-
-    res.clearCookie(
-      'beicola_session'
-    );
-
-    res.json({
-      ok: true,
-      message:
-        'Senha alterada. Faça login novamente.'
-    });
-  }
-);
-
-app.post(
-  '/api/forgot-password',
-  async (req, res) => {
-    const email =
-      String(
-        req.body?.email || ''
-      )
-        .toLowerCase()
-        .trim();
-
-    const user = get(
-      `
-        SELECT *
-        FROM users
-        WHERE email=:email
-      `,
-      {
-        email
-      }
-    );
-
-    const generic = {
-      message:
-        'Se o e-mail estiver cadastrado, as instruções de recuperação foram preparadas.'
-    };
-
-    if (!user) {
-      return res.json(generic);
-    }
-
-    const rawToken = id(32);
-
-    const tokenHash =
-      hash(rawToken);
-
-    const expires =
-      new Date(
-        Date.now() +
-        15 * 60 * 1000
-      ).toISOString();
-
-    run(
-      `
-        DELETE FROM password_resets
-        WHERE user_id=:id
-      `,
-      {
-        id: user.id
-      }
-    );
-
-    run(
-      `
-        INSERT INTO password_resets(
-          id,
-          user_id,
-          token_hash,
-          expires_at,
-          used,
-          created_at
-        )
-        VALUES(
-          :id,
-          :uid,
-          :th,
-          :exp,
-          0,
-          :created
-        )
-      `,
-      {
-        id: id(),
-        uid: user.id,
-        th: tokenHash,
-        exp: expires,
-        created: now()
-      }
-    );
-
-    const url =
-      `${process.env.FRONTEND_URL || `http://localhost:${PORT}`}` +
-      `/pages/reset-password.html?token=${rawToken}`;
-
-    const mailer =
-      transporter();
-
-    if (mailer) {
-      await mailer.sendMail({
-        from:
-          process.env.MAIL_FROM,
-        to: user.email,
-        subject:
-          'Recuperação de senha — Beiçola F.I.',
-        text:
-          `Olá, ${user.name}. ` +
-          `Use este link para criar uma nova senha ` +
-          `(válido por 15 minutos): ${url}`
-      });
-    } else if (
-      process.env.NODE_ENV !==
-      'production'
-    ) {
-      console.log(
-        '\n[RECUPERAÇÃO DE SENHA - DESENVOLVIMENTO]\n' +
-        url +
-        '\n'
-      );
-    }
-
-    res.json(generic);
-  }
-);
-
-app.post(
-  '/api/reset-password',
-  async (req, res) => {
-    const {
-      token,
-      newPassword
-    } = req.body || {};
-
-    if (
-      !token ||
-      !newPassword ||
-      newPassword.length < 8
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Token e nova senha são necessários; mínimo de 8 caracteres.'
-        });
-    }
-
-    const reset = get(
-      `
-        SELECT *
+          used
         FROM password_resets
-        WHERE token_hash=:h
-        AND used=0
-        AND expires_at>:now
+        WHERE token_hash = ?
       `,
-      {
-        h: hash(token),
-        now: now()
-      }
+      [tokenHash]
     );
 
     if (!reset) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Token inválido ou expirado.'
-        });
+      return res.status(400).json({
+        error: "O link de recuperação é inválido."
+      });
     }
 
-    run(
+    if (Number(reset.used) === 1) {
+      return res.status(400).json({
+        error: "Este link de recuperação já foi utilizado."
+      });
+    }
+
+    if (Number(reset.expires_at) < Date.now()) {
+      return res.status(400).json({
+        error:
+          "Este link de recuperação expirou. Solicite um novo."
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(
+      password,
+      12
+    );
+
+    db.run(
       `
         UPDATE users
-        SET password_hash=:p
-        WHERE id=:id
+        SET password_hash = ?
+        WHERE id = ?
       `,
-      {
-        p:
-          await bcrypt.hash(
-            newPassword,
-            12
-          ),
-        id: reset.user_id
-      }
+      [
+        passwordHash,
+        reset.user_id
+      ]
     );
 
-    run(
+    /*
+     * O token não pode ser reutilizado.
+     */
+    db.run(
       `
         UPDATE password_resets
-        SET used=1
-        WHERE id=:id
+        SET used = 1
+        WHERE id = ?
       `,
-      {
-        id: reset.id
-      }
+      [reset.id]
     );
 
-    run(
+    /*
+     * Por segurança, encerra todas as sessões
+     * existentes daquele usuário.
+     */
+    db.run(
       `
         DELETE FROM sessions
-        WHERE user_id=:id
+        WHERE user_id = ?
       `,
-      {
-        id: reset.user_id
-      }
+      [reset.user_id]
     );
 
+    saveDb();
+
     res.json({
-      ok: true,
       message:
-        'Senha redefinida. Agora faça login.'
+        "Senha alterada com sucesso."
     });
+  } catch (error) {
+    console.error(
+      "Erro ao redefinir senha:",
+      error
+    );
+
+    res.status(500).json({
+      error:
+        "Não foi possível alterar a senha."
+    });
+  }
+});
+
+/* =========================================================
+   API — ALTERAR SENHA LOGADO
+========================================================= */
+
+app.post(
+  "/api/change-password",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const currentPassword = String(
+        req.body.currentPassword || ""
+      );
+
+      const newPassword = String(
+        req.body.newPassword || ""
+      );
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({
+          error:
+            "Informe a senha atual e a nova senha."
+        });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({
+          error:
+            "A nova senha deve ter pelo menos 8 caracteres."
+        });
+      }
+
+      const user = db.exec(
+        `
+          SELECT *
+          FROM users
+          WHERE id = ?
+        `,
+        [req.user.id]
+      );
+
+      if (
+        !user.length ||
+        !user[0].values.length
+      ) {
+        return res.status(404).json({
+          error: "Usuário não encontrado."
+        });
+      }
+
+      const columns = user[0].columns;
+      const values = user[0].values[0];
+
+      const userData = {};
+
+      columns.forEach((column, index) => {
+        userData[column] = values[index];
+      });
+
+      const valid = await bcrypt.compare(
+        currentPassword,
+        userData.password_hash
+      );
+
+      if (!valid) {
+        return res.status(401).json({
+          error: "A senha atual está incorreta."
+        });
+      }
+
+      const passwordHash =
+        await bcrypt.hash(
+          newPassword,
+          12
+        );
+
+      db.run(
+        `
+          UPDATE users
+          SET password_hash = ?
+          WHERE id = ?
+        `,
+        [
+          passwordHash,
+          req.user.id
+        ]
+      );
+
+      /*
+       * Encerra as outras sessões.
+       */
+      db.run(
+        `
+          DELETE FROM sessions
+          WHERE user_id = ?
+        `,
+        [req.user.id]
+      );
+
+      saveDb();
+
+      res.clearCookie(
+        "beicola_session"
+      );
+
+      res.json({
+        message:
+          "Senha alterada com sucesso. Faça login novamente."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao alterar senha:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível alterar sua senha."
+      });
+    }
   }
 );
 
-/* =========================
-   PERFIL
-========================= */
+/* =========================================================
+   API — PERFIL
+========================================================= */
 
 app.get(
-  '/api/profile',
-  auth,
+  "/api/profile",
+  requireAuth,
   (req, res) => {
+    const user = getOne(
+      `
+        SELECT
+          id,
+          name,
+          email,
+          role,
+          created_at
+        FROM users
+        WHERE id = ?
+      `,
+      [req.user.id]
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: "Usuário não encontrado."
+      });
+    }
+
     res.json({
-      user: req.user
+      user
     });
   }
 );
 
 app.put(
-  '/api/profile',
-  auth,
+  "/api/profile",
+  requireAuth,
   (req, res) => {
-    const name =
-      String(
-        req.body?.name || ''
+    try {
+      const name = String(
+        req.body.name || ""
       ).trim();
 
-    if (name.length < 2) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Nome inválido.'
+      if (!name || name.length < 2) {
+        return res.status(400).json({
+          error: "Informe um nome válido."
         });
-    }
-
-    run(
-      `
-        UPDATE users
-        SET name=:name
-        WHERE id=:id
-      `,
-      {
-        name,
-        id: req.user.id
       }
+
+      db.run(
+        `
+          UPDATE users
+          SET name = ?
+          WHERE id = ?
+        `,
+        [
+          name,
+          req.user.id
+        ]
+      );
+
+      saveDb();
+
+      res.json({
+        message:
+          "Perfil atualizado com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao atualizar perfil:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível atualizar o perfil."
+      });
+    }
+  }
+);
+
+/* =========================================================
+   API — MEMBROS
+========================================================= */
+
+app.get(
+  "/api/members",
+  requireAuth,
+  (req, res) => {
+    const members = getRows(
+      `
+        SELECT
+          id,
+          name,
+          email,
+          role,
+          created_at
+        FROM users
+        ORDER BY name ASC
+      `
     );
 
     res.json({
-      user: publicUser(
-        get(
-          'SELECT * FROM users WHERE id=:id',
-          {
-            id: req.user.id
-          }
-        )
-      )
+      members
     });
   }
 );
 
-/* =========================
-   ENQUETES
-========================= */
+/* =========================================================
+   API — ENQUETES
+========================================================= */
 
 app.get(
-  '/api/polls',
-  auth,
+  "/api/polls",
+  requireAuth,
   (req, res) => {
-    const polls =
-      all(
+    const polls = getRows(
+      `
+        SELECT
+          p.id,
+          p.question,
+          p.options_json,
+          p.multiple_choice,
+          p.closes_at,
+          p.created_at,
+          p.created_by,
+          u.name AS creator_name
+        FROM polls p
+        LEFT JOIN users u
+          ON u.id = p.created_by
+        ORDER BY p.created_at DESC
+      `
+    );
+
+    const result = polls.map((poll) => {
+      let options = [];
+
+      try {
+        options = JSON.parse(
+          poll.options_json
+        );
+      } catch {
+        options = [];
+      }
+
+      const votes = getRows(
+        `
+          SELECT
+            option_index,
+            COUNT(*) AS count
+          FROM votes
+          WHERE poll_id = ?
+          GROUP BY option_index
+        `,
+        [poll.id]
+      );
+
+      const myVotes = getRows(
+        `
+          SELECT option_index
+          FROM votes
+          WHERE poll_id = ?
+          AND user_id = ?
+        `,
+        [
+          poll.id,
+          req.user.id
+        ]
+      ).map(
+        (vote) =>
+          Number(vote.option_index)
+      );
+
+      const totalVotes = votes.reduce(
+        (sum, vote) =>
+          sum + Number(vote.count),
+        0
+      );
+
+      const voteCounts = {};
+
+      votes.forEach((vote) => {
+        voteCounts[
+          vote.option_index
+        ] = Number(vote.count);
+      });
+
+      return {
+        id: poll.id,
+        question: poll.question,
+        options,
+        multiple_choice:
+          Boolean(poll.multiple_choice),
+        closes_at: poll.closes_at,
+        created_at: poll.created_at,
+        creator_name:
+          poll.creator_name || "Administrador",
+        total_votes: totalVotes,
+        vote_counts: voteCounts,
+        my_votes: myVotes,
+        closed:
+          poll.closes_at &&
+          new Date(poll.closes_at).getTime() <=
+            Date.now()
+      };
+    });
+
+    res.json({
+      polls: result
+    });
+  }
+);
+
+app.post(
+  "/api/polls",
+  requireAdmin,
+  (req, res) => {
+    try {
+      const question = String(
+        req.body.question || ""
+      ).trim();
+
+      const options = Array.isArray(
+        req.body.options
+      )
+        ? req.body.options
+            .map((option) =>
+              String(option).trim()
+            )
+            .filter(Boolean)
+        : [];
+
+      const multipleChoice =
+        Boolean(
+          req.body.multiple_choice
+        );
+
+      const closesAt =
+        req.body.closes_at
+          ? String(
+              req.body.closes_at
+            )
+          : null;
+
+      if (!question) {
+        return res.status(400).json({
+          error:
+            "Informe a pergunta da enquete."
+        });
+      }
+
+      if (options.length < 2) {
+        return res.status(400).json({
+          error:
+            "A enquete precisa ter pelo menos duas opções."
+        });
+      }
+
+      db.run(
+        `
+          INSERT INTO polls
+          (
+            question,
+            options_json,
+            multiple_choice,
+            closes_at,
+            created_by
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        [
+          question,
+          JSON.stringify(options),
+          multipleChoice ? 1 : 0,
+          closesAt,
+          req.user.id
+        ]
+      );
+
+      saveDb();
+
+      res.status(201).json({
+        message:
+          "Enquete criada com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao criar enquete:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível criar a enquete."
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/polls/:id/vote",
+  requireAuth,
+  (req, res) => {
+    try {
+      const pollId = Number(
+        req.params.id
+      );
+
+      const selectedOptions =
+        Array.isArray(
+          req.body.options
+        )
+          ? req.body.options.map(Number)
+          : [];
+
+      if (
+        !selectedOptions.length
+      ) {
+        return res.status(400).json({
+          error:
+            "Selecione pelo menos uma opção."
+        });
+      }
+
+      const poll = getOne(
         `
           SELECT *
           FROM polls
-          ORDER BY created_at DESC
-        `
-      ).map(poll => {
-        const vote =
-          get(
-            `
-              SELECT option_indexes_json
-              FROM votes
-              WHERE poll_id=:pid
-              AND user_id=:uid
-            `,
-            {
-              pid: poll.id,
-              uid: req.user.id
-            }
-          );
-
-        return {
-          ...poll,
-          options:
-            JSON.parse(
-              poll.options_json
-            ),
-          multiple:
-            !!poll.multiple,
-          closed:
-            !!poll.closed,
-          hasVoted:
-            !!vote
-        };
-      });
-
-    res.json({
-      polls
-    });
-  }
-);
-
-app.post(
-  '/api/polls',
-  auth,
-  admin,
-  (req, res) => {
-    const {
-      question,
-      options,
-      multiple,
-      closesAt
-    } = req.body || {};
-
-    if (
-      !question ||
-      !Array.isArray(options) ||
-      options.length < 2 ||
-      options.some(
-        option =>
-          !String(
-            option
-          ).trim()
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Informe a pergunta e pelo menos duas opções.'
-        });
-    }
-
-    const poll = {
-      id: id(),
-      question:
-        question.trim(),
-      options_json:
-        JSON.stringify(
-          options.map(
-            option =>
-              String(
-                option
-              ).trim()
-          )
-        ),
-      multiple:
-        multiple ? 1 : 0,
-      closes_at:
-        closesAt || null,
-      created_by:
-        req.user.id,
-      created_at: now()
-    };
-
-    run(
-      `
-        INSERT INTO polls(
-          id,
-          question,
-          options_json,
-          multiple,
-          closes_at,
-          created_by,
-          created_at,
-          closed
-        )
-        VALUES(
-          :id,
-          :question,
-          :options_json,
-          :multiple,
-          :closes_at,
-          :created_by,
-          :created_at,
-          0
-        )
-      `,
-      poll
-    );
-
-    res
-      .status(201)
-      .json({
-        poll: {
-          ...poll,
-          options
-        }
-      });
-  }
-);
-
-app.post(
-  '/api/polls/:id/vote',
-  auth,
-  (req, res) => {
-    const poll =
-      get(
-        'SELECT * FROM polls WHERE id=:id',
-        {
-          id: req.params.id
-        }
+          WHERE id = ?
+        `,
+        [pollId]
       );
 
-    if (!poll) {
-      return res
-        .status(404)
-        .json({
+      if (!poll) {
+        return res.status(404).json({
           error:
-            'Enquete não encontrada.'
+            "Enquete não encontrada."
         });
-    }
+      }
 
-    if (
-      poll.closed ||
-      (
+      if (
         poll.closes_at &&
         new Date(
           poll.closes_at
-        ) <= new Date()
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Esta enquete está encerrada.'
-        });
-    }
-
-    const choices =
-      Array.isArray(
-        req.body?.options
-      )
-        ? req.body.options.map(
-            Number
-          )
-        : [];
-
-    const options =
-      JSON.parse(
-        poll.options_json
-      );
-
-    const unique =
-      [...new Set(choices)];
-
-    if (
-      !unique.length ||
-      unique.some(
-        index =>
-          index < 0 ||
-          index >= options.length
-      ) ||
-      (
-        poll.multiple === 0 &&
-        unique.length !== 1
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Opção inválida.'
-        });
-    }
-
-    if (
-      get(
-        `
-          SELECT id
-          FROM votes
-          WHERE poll_id=:p
-          AND user_id=:u
-        `,
-        {
-          p: poll.id,
-          u: req.user.id
-        }
-      )
-    ) {
-      return res
-        .status(409)
-        .json({
-          error:
-            'Você já votou nesta enquete.'
-        });
-    }
-
-    run(
-      `
-        INSERT INTO votes(
-          id,
-          poll_id,
-          user_id,
-          option_indexes_json,
-          created_at
-        )
-        VALUES(
-          :id,
-          :p,
-          :u,
-          :o,
-          :c
-        )
-      `,
-      {
-        id: id(),
-        p: poll.id,
-        u: req.user.id,
-        o: JSON.stringify(
-          unique
-        ),
-        c: now()
-      }
-    );
-
-    res.json({
-      ok: true
-    });
-  }
-);
-
-app.get(
-  '/api/polls/:id/results',
-  auth,
-  (req, res) => {
-    const poll =
-      get(
-        'SELECT * FROM polls WHERE id=:id',
-        {
-          id: req.params.id
-        }
-      );
-
-    if (!poll) {
-      return res
-        .status(404)
-        .json({
-          error:
-            'Enquete não encontrada.'
-        });
-    }
-
-    const options =
-      JSON.parse(
-        poll.options_json
-      );
-
-    const counts =
-      options.map(label => ({
-        label,
-        count: 0
-      }));
-
-    const votes =
-      all(
-        `
-          SELECT option_indexes_json
-          FROM votes
-          WHERE poll_id=:p
-        `,
-        {
-          p: poll.id
-        }
-      );
-
-    for (const vote of votes) {
-      for (
-        const index of
-        JSON.parse(
-          vote.option_indexes_json
-        )
+        ).getTime() <= Date.now()
       ) {
-        if (counts[index]) {
-          counts[index].count++;
-        }
+        return res.status(400).json({
+          error:
+            "Esta enquete já foi encerrada."
+        });
       }
-    }
 
-    res.json({
-      question:
-        poll.question,
-      results: counts,
-      total:
-        votes.length
-    });
-  }
-);
+      const options =
+        JSON.parse(
+          poll.options_json
+        );
 
-app.post(
-  '/api/polls/:id/close',
-  auth,
-  admin,
-  (req, res) => {
-    run(
-      `
-        UPDATE polls
-        SET closed=1
-        WHERE id=:id
-      `,
-      {
-        id: req.params.id
+      const validOptions =
+        selectedOptions.every(
+          (index) =>
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index < options.length
+        );
+
+      if (!validOptions) {
+        return res.status(400).json({
+          error:
+            "Uma ou mais opções são inválidas."
+        });
       }
-    );
 
-    res.json({
-      ok: true
-    });
-  }
-);
-
-/* =========================
-   PARTIDAS
-========================= */
-
-app.get(
-  '/api/matches',
-  auth,
-  (req, res) => {
-    res.json({
-      matches:
-        all(
-          `
-            SELECT *
-            FROM matches
-            ORDER BY date ASC,time ASC
-          `
-        )
-    });
-  }
-);
-
-app.post(
-  '/api/matches',
-  auth,
-  admin,
-  (req, res) => {
-    const {
-      opponent,
-      date,
-      time,
-      location,
-      result,
-      status,
-      notes
-    } = req.body || {};
-
-    if (
-      !opponent ||
-      !date
-    ) {
-      return res
-        .status(400)
-        .json({
+      if (
+        !poll.multiple_choice &&
+        selectedOptions.length !== 1
+      ) {
+        return res.status(400).json({
           error:
-            'Adversário e data são obrigatórios.'
+            "Esta enquete permite apenas uma opção."
         });
-    }
-
-    const match = {
-      id: id(),
-      opponent,
-      date,
-      time: time || '',
-      location:
-        location || '',
-      result:
-        result || '',
-      status:
-        status || 'agendada',
-      notes:
-        notes || '',
-      created_at: now()
-    };
-
-    run(
-      `
-        INSERT INTO matches(
-          id,
-          opponent,
-          date,
-          time,
-          location,
-          result,
-          status,
-          notes,
-          created_at
-        )
-        VALUES(
-          :id,
-          :opponent,
-          :date,
-          :time,
-          :location,
-          :result,
-          :status,
-          :notes,
-          :created_at
-        )
-      `,
-      match
-    );
-
-    res
-      .status(201)
-      .json({
-        match
-      });
-  }
-);
-
-app.put(
-  '/api/matches/:id',
-  auth,
-  admin,
-  (req, res) => {
-    const old =
-      get(
-        'SELECT * FROM matches WHERE id=:id',
-        {
-          id: req.params.id
-        }
-      );
-
-    if (!old) {
-      return res
-        .status(404)
-        .json({
-          error:
-            'Partida não encontrada.'
-        });
-    }
-
-    const match = {
-      ...old,
-      ...req.body,
-      id: req.params.id
-    };
-
-    run(
-      `
-        UPDATE matches
-        SET
-          opponent=:opponent,
-          date=:date,
-          time=:time,
-          location=:location,
-          result=:result,
-          status=:status,
-          notes=:notes
-        WHERE id=:id
-      `,
-      match
-    );
-
-    res.json({
-      match
-    });
-  }
-);
-
-app.delete(
-  '/api/matches/:id',
-  auth,
-  admin,
-  (req, res) => {
-    run(
-      `
-        DELETE FROM matches
-        WHERE id=:id
-      `,
-      {
-        id: req.params.id
       }
-    );
 
-    res.json({
-      ok: true
-    });
-  }
-);
-
-/* =========================
-   AVISOS
-========================= */
-
-app.get(
-  '/api/announcements',
-  auth,
-  (req, res) => {
-    res.json({
-      announcements:
-        all(
+      const existingVote =
+        getOne(
           `
-            SELECT
-              a.*,
-              u.name AS author
-            FROM announcements a
-            JOIN users u
-              ON u.id=a.created_by
-            ORDER BY a.created_at DESC
-          `
-        )
-    });
-  }
-);
+            SELECT id
+            FROM votes
+            WHERE poll_id = ?
+            AND user_id = ?
+            LIMIT 1
+          `,
+          [
+            pollId,
+            req.user.id
+          ]
+        );
 
-app.post(
-  '/api/announcements',
-  auth,
-  admin,
-  (req, res) => {
-    const {
-      title,
-      body
-    } = req.body || {};
-
-    if (!title || !body) {
-      return res
-        .status(400)
-        .json({
+      if (existingVote) {
+        return res.status(409).json({
           error:
-            'Título e texto são obrigatórios.'
+            "Você já votou nesta enquete."
         });
-    }
-
-    const announcement = {
-      id: id(),
-      title:
-        title.trim(),
-      body:
-        body.trim(),
-      created_by:
-        req.user.id,
-      created_at: now()
-    };
-
-    run(
-      `
-        INSERT INTO announcements(
-          id,
-          title,
-          body,
-          created_by,
-          created_at
-        )
-        VALUES(
-          :id,
-          :title,
-          :body,
-          :created_by,
-          :created_at
-        )
-      `,
-      announcement
-    );
-
-    res
-      .status(201)
-      .json({
-        announcement
-      });
-  }
-);
-
-/* =========================
-   ESCALAÇÃO
-========================= */
-
-app.get(
-  '/api/lineup',
-  auth,
-  (req, res) => {
-    res.json({
-      lineup:
-        all(
-          `
-            SELECT *
-            FROM lineup
-            ORDER BY
-              starter DESC,
-              number ASC,
-              player_name ASC
-          `
-        )
-    });
-  }
-);
-
-app.put(
-  '/api/lineup',
-  auth,
-  admin,
-  (req, res) => {
-    if (
-      !Array.isArray(
-        req.body?.players
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Lista inválida.'
-        });
-    }
-
-    run(
-      'DELETE FROM lineup'
-    );
-
-    for (
-      const player of
-      req.body.players
-    ) {
-      run(
-        `
-          INSERT INTO lineup(
-            id,
-            player_name,
-            position,
-            starter,
-            injured,
-            number,
-            notes,
-            updated_at
-          )
-          VALUES(
-            :id,
-            :name,
-            :position,
-            :starter,
-            :injured,
-            :number,
-            :notes,
-            :updated
-          )
-        `,
-        {
-          id: id(),
-          name:
-            String(
-              player.player_name ||
-              ''
-            ).trim(),
-          position:
-            player.position ||
-            '',
-          starter:
-            player.starter
-              ? 1
-              : 0,
-          injured:
-            player.injured
-              ? 1
-              : 0,
-          number:
-            player.number ||
-            '',
-          notes:
-            player.notes ||
-            '',
-          updated: now()
-        }
-      );
-    }
-
-    res.json({
-      ok: true
-    });
-  }
-);
-
-/* =========================
-   MEMBROS
-========================= */
-
-app.get(
-  '/api/members',
-  auth,
-  (req, res) => {
-    res.json({
-      members:
-        all(
-          `
-            SELECT
-              id,
-              name,
-              email,
-              role,
-              created_at
-            FROM users
-            ORDER BY name
-          `
-        )
-    });
-  }
-);
-
-app.put(
-  '/api/members/:id/role',
-  auth,
-  admin,
-  (req, res) => {
-    const role =
-      req.body?.role;
-
-    if (
-      !['member', 'admin']
-        .includes(role)
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Cargo inválido.'
-        });
-    }
-
-    run(
-      `
-        UPDATE users
-        SET role=:role
-        WHERE id=:id
-      `,
-      {
-        role,
-        id: req.params.id
       }
-    );
 
-    res.json({
-      ok: true
-    });
-  }
-);
-
-app.delete(
-  '/api/members/:id',
-  auth,
-  admin,
-  (req, res) => {
-    if (
-      req.params.id ===
-      req.user.id
-    ) {
-      return res
-        .status(400)
-        .json({
-          error:
-            'Você não pode remover sua própria conta.'
-        });
-    }
-
-    run(
-      `
-        DELETE FROM users
-        WHERE id=:id
-      `,
-      {
-        id: req.params.id
-      }
-    );
-
-    res.json({
-      ok: true
-    });
-  }
-);
-
-/* =========================
-   FRONTEND
-========================= */
-
-app.get(
-  /.*/,
-  (req, res) => {
-    res.sendFile(
-      path.join(
-        FRONTEND_DIR,
-        'index.html'
-      )
-    );
-  }
-);
-
-/* =========================
-   START
-========================= */
-
-init()
-  .then(() => {
-    app.listen(
-      PORT,
-      () => {
-        console.log(
-          `Beiçola F.I. rodando em http://localhost:${PORT}`
+      for (
+        const optionIndex of selectedOptions
+      ) {
+        db.run(
+          `
+            INSERT INTO votes
+            (
+              poll_id,
+              user_id,
+              option_index
+            )
+            VALUES (?, ?, ?)
+          `,
+          [
+            pollId,
+            req.user.id,
+            optionIndex
+          ]
         );
       }
+
+      saveDb();
+
+      res.json({
+        message:
+          "Voto registrado com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao votar:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível registrar o voto."
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/polls/:id",
+  requireAdmin,
+  (req, res) => {
+    try {
+      const pollId = Number(
+        req.params.id
+      );
+
+      const poll = getOne(
+        `
+          SELECT id
+          FROM polls
+          WHERE id = ?
+        `,
+        [pollId]
+      );
+
+      if (!poll) {
+        return res.status(404).json({
+          error:
+            "Enquete não encontrada."
+        });
+      }
+
+      db.run(
+        `
+          DELETE FROM polls
+          WHERE id = ?
+        `,
+        [pollId]
+      );
+
+      saveDb();
+
+      res.json({
+        message:
+          "Enquete excluída com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao excluir enquete:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível excluir a enquete."
+      });
+    }
+  }
+);
+
+/* =========================================================
+   API — JOGOS
+========================================================= */
+
+app.get(
+  "/api/matches",
+  requireAuth,
+  (req, res) => {
+    const matches = getRows(
+      `
+        SELECT *
+        FROM matches
+        ORDER BY match_date ASC
+      `
     );
+
+    res.json({
+      matches
+    });
+  }
+);
+
+app.post(
+  "/api/matches",
+  requireAdmin,
+  (req, res) => {
+    try {
+      const opponent = String(
+        req.body.opponent || ""
+      ).trim();
+
+      const matchDate = String(
+        req.body.match_date || ""
+      ).trim();
+
+      const location = String(
+        req.body.location || ""
+      ).trim();
+
+      const result = String(
+        req.body.result || ""
+      ).trim();
+
+      const notes = String(
+        req.body.notes || ""
+      ).trim();
+
+      if (!opponent || !matchDate) {
+        return res.status(400).json({
+          error:
+            "Informe adversário e data."
+        });
+      }
+
+      db.run(
+        `
+          INSERT INTO matches
+          (
+            opponent,
+            match_date,
+            location,
+            result,
+            notes
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        [
+          opponent,
+          matchDate,
+          location,
+          result,
+          notes
+        ]
+      );
+
+      saveDb();
+
+      res.status(201).json({
+        message:
+          "Jogo adicionado com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao adicionar jogo:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível adicionar o jogo."
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/matches/:id",
+  requireAdmin,
+  (req, res) => {
+    try {
+      const id = Number(
+        req.params.id
+      );
+
+      db.run(
+        `
+          DELETE FROM matches
+          WHERE id = ?
+        `,
+        [id]
+      );
+
+      saveDb();
+
+      res.json({
+        message:
+          "Jogo removido com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao remover jogo:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível remover o jogo."
+      });
+    }
+  }
+);
+
+/* =========================================================
+   API — AVISOS / NOTÍCIAS
+========================================================= */
+
+app.get(
+  "/api/announcements",
+  requireAuth,
+  (req, res) => {
+    const announcements =
+      getRows(
+        `
+          SELECT
+            a.id,
+            a.title,
+            a.content,
+            a.created_at,
+            a.created_by,
+            u.name AS creator_name
+          FROM announcements a
+          LEFT JOIN users u
+            ON u.id = a.created_by
+          ORDER BY a.created_at DESC
+        `
+      );
+
+    res.json({
+      announcements
+    });
+  }
+);
+
+app.post(
+  "/api/announcements",
+  requireAdmin,
+  (req, res) => {
+    try {
+      const title = String(
+        req.body.title || ""
+      ).trim();
+
+      const content = String(
+        req.body.content || ""
+      ).trim();
+
+      if (!title || !content) {
+        return res.status(400).json({
+          error:
+            "Informe título e conteúdo."
+        });
+      }
+
+      db.run(
+        `
+          INSERT INTO announcements
+          (
+            title,
+            content,
+            created_by
+          )
+          VALUES (?, ?, ?)
+        `,
+        [
+          title,
+          content,
+          req.user.id
+        ]
+      );
+
+      saveDb();
+
+      res.status(201).json({
+        message:
+          "Aviso publicado com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao publicar aviso:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível publicar o aviso."
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/announcements/:id",
+  requireAdmin,
+  (req, res) => {
+    try {
+      const id = Number(
+        req.params.id
+      );
+
+      db.run(
+        `
+          DELETE FROM announcements
+          WHERE id = ?
+        `,
+        [id]
+      );
+
+      saveDb();
+
+      res.json({
+        message:
+          "Aviso removido com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao remover aviso:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível remover o aviso."
+      });
+    }
+  }
+);
+
+/* =========================================================
+   API — ESCALAÇÃO
+========================================================= */
+
+app.get(
+  "/api/lineup",
+  requireAuth,
+  (req, res) => {
+    const lineup = getRows(
+      `
+        SELECT *
+        FROM lineup
+        ORDER BY
+          CASE
+            WHEN status = 'titular'
+            THEN 0
+            ELSE 1
+          END,
+          id ASC
+      `
+    );
+
+    res.json({
+      lineup
+    });
+  }
+);
+
+app.put(
+  "/api/lineup",
+  requireAdmin,
+  (req, res) => {
+    try {
+      if (
+        !Array.isArray(
+          req.body.lineup
+        )
+      ) {
+        return res.status(400).json({
+          error:
+            "A escalação precisa ser uma lista."
+        });
+      }
+
+      db.run(
+        `DELETE FROM lineup`
+      );
+
+      for (
+        const player of req.body.lineup
+      ) {
+        const playerName =
+          String(
+            player.player_name || ""
+          ).trim();
+
+        if (!playerName) {
+          continue;
+        }
+
+        const position =
+          String(
+            player.position || ""
+          ).trim();
+
+        const status =
+          String(
+            player.status ||
+              "reserva"
+          ).trim();
+
+        const number =
+          String(
+            player.number || ""
+          ).trim();
+
+        const notes =
+          String(
+            player.notes || ""
+          ).trim();
+
+        db.run(
+          `
+            INSERT INTO lineup
+            (
+              player_name,
+              position,
+              status,
+              number,
+              notes
+            )
+            VALUES (?, ?, ?, ?, ?)
+          `,
+          [
+            playerName,
+            position,
+            status,
+            number,
+            notes
+          ]
+        );
+      }
+
+      saveDb();
+
+      res.json({
+        message:
+          "Escalação atualizada com sucesso."
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao atualizar escalação:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Não foi possível atualizar a escalação."
+      });
+    }
+  }
+);
+
+/* =========================================================
+   ARQUIVOS DO FRONTEND
+========================================================= */
+
+app.use(
+  express.static(FRONTEND_DIR)
+);
+
+/*
+ * Permite acessar páginas HTML diretamente.
+ * A API continua protegida pelas rotas acima.
+ */
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return next();
+  }
+
+  res.sendFile(
+    path.join(
+      FRONTEND_DIR,
+      "index.html"
+    )
+  );
+});
+
+/* =========================================================
+   TRATAMENTO DE ERROS
+========================================================= */
+
+app.use(
+  (err, req, res, next) => {
+    console.error(
+      "Erro interno:",
+      err
+    );
+
+    res.status(500).json({
+      error:
+        "Ocorreu um erro interno no servidor."
+    });
+  }
+);
+
+/* =========================================================
+   INICIALIZAÇÃO
+========================================================= */
+
+initDatabase()
+  .then(() => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(
+        `Beiçola F.I. rodando em http://localhost:${PORT}`
+      );
+    });
   })
-  .catch(error => {
-    console.error(error);
+  .catch((error) => {
+    console.error(
+      "Erro ao iniciar banco de dados:",
+      error
+    );
+
     process.exit(1);
   });
