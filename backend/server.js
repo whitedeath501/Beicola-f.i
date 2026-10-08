@@ -1,2499 +1,3291 @@
-const API = "/api";
+const express = require("express");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const cookieParser = require("cookie-parser");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const nodemailer = require("nodemailer");
+const initSqlJs = require("sql.js");
+require("dotenv").config();
 
-const state = {
-    me: null,
-    players: [],
-    members: [],
-    roles: {
-        penalty: [],
-        free_kick: []
-    },
-    matches: [],
-    polls: [],
-    announcements: [],
-    currentSection: "dashboard",
-    editingPlayerId: null
-};
+const app = express();
 
-// ===============================
+const PORT = Number(process.env.PORT || 3000);
+const NODE_ENV = process.env.NODE_ENV || "development";
+
+const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "beicola.sqlite");
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+app.disable("x-powered-by");
+
+app.use(
+    helmet({
+        contentSecurityPolicy: false
+    })
+);
+
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: "Muitas tentativas. Aguarde alguns minutos."
+    }
+});
+
+const passwordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 8,
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+let db;
+
+let transporter = null;
+
+if (
+    process.env.SMTP_HOST &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS
+) {
+    transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure:
+            String(process.env.SMTP_SECURE).toLowerCase() === "true",
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+}
+
+// ======================================================
+// BANCO DE DADOS
+// ======================================================
+
+function saveDatabase() {
+    const data = db.export();
+
+    fs.writeFileSync(DB_FILE, Buffer.from(data));
+}
+
+function run(sql, params = []) {
+    db.run(sql, params);
+}
+
+function get(sql, params = []) {
+    const result = db.exec(sql, params);
+
+    if (!result.length) {
+        return null;
+    }
+
+    const columns = result[0].columns;
+    const values = result[0].values;
+
+    if (!values.length) {
+        return null;
+    }
+
+    const row = {};
+
+    columns.forEach((column, index) => {
+        row[column] = values[0][index];
+    });
+
+    return row;
+}
+
+function all(sql, params = []) {
+    const result = db.exec(sql, params);
+
+    if (!result.length) {
+        return [];
+    }
+
+    const columns = result[0].columns;
+
+    return result[0].values.map(values => {
+        const row = {};
+
+        columns.forEach((column, index) => {
+            row[column] = values[index];
+        });
+
+        return row;
+    });
+}
+
+function columnExists(table, column) {
+    const rows = all(`PRAGMA table_info(${table})`);
+
+    return rows.some(row => row.name === column);
+}
+
+function addColumnIfMissing(table, column, definition) {
+    if (!columnExists(table, column)) {
+        run(
+            `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`
+        );
+    }
+}
+
+function initializeDatabase(SQL) {
+    if (fs.existsSync(DB_FILE)) {
+        const file = fs.readFileSync(DB_FILE);
+
+        db = new SQL.Database(file);
+    } else {
+        db = new SQL.Database();
+    }
+
+    run(`
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE CASCADE
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE CASCADE
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS players (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            name TEXT NOT NULL,
+            number INTEGER UNIQUE,
+            primary_position TEXT NOT NULL,
+            secondary_positions TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'disponivel',
+            instructions TEXT NOT NULL DEFAULT '',
+            is_captain INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE SET NULL
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS player_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(player_id, role, priority),
+            FOREIGN KEY (player_id)
+                REFERENCES players(id)
+                ON DELETE CASCADE
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS polls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question TEXT NOT NULL,
+            closes_at TEXT,
+            multiple_choice INTEGER NOT NULL DEFAULT 0,
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by)
+                REFERENCES users(id)
+                ON DELETE SET NULL
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS poll_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poll_id INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            FOREIGN KEY (poll_id)
+                REFERENCES polls(id)
+                ON DELETE CASCADE
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS poll_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poll_id INTEGER NOT NULL,
+            option_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (poll_id)
+                REFERENCES polls(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (option_id)
+                REFERENCES poll_options(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE CASCADE
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS matches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            opponent TEXT NOT NULL,
+            match_date TEXT,
+            location TEXT NOT NULL DEFAULT '',
+            result TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS match_lineup (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            player_id INTEGER NOT NULL,
+            position TEXT NOT NULL,
+            starter INTEGER NOT NULL DEFAULT 0,
+            instructions TEXT NOT NULL DEFAULT '',
+            UNIQUE(match_id, player_id),
+            FOREIGN KEY (match_id)
+                REFERENCES matches(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (player_id)
+                REFERENCES players(id)
+                ON DELETE CASCADE
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS lineup (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_name TEXT NOT NULL,
+            position TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'reserva',
+            number INTEGER,
+            notes TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    run(`
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by)
+                REFERENCES users(id)
+                ON DELETE SET NULL
+        )
+    `);
+
+    // Compatibilidade com versões antigas
+    addColumnIfMissing(
+        "users",
+        "role",
+        "TEXT NOT NULL DEFAULT 'member'"
+    );
+
+    addColumnIfMissing(
+        "players",
+        "secondary_positions",
+        "TEXT NOT NULL DEFAULT '[]'"
+    );
+
+    addColumnIfMissing(
+        "players",
+        "status",
+        "TEXT NOT NULL DEFAULT 'disponivel'"
+    );
+
+    addColumnIfMissing(
+        "players",
+        "instructions",
+        "TEXT NOT NULL DEFAULT ''"
+    );
+
+    addColumnIfMissing(
+        "players",
+        "is_captain",
+        "INTEGER NOT NULL DEFAULT 0"
+    );
+
+    addColumnIfMissing(
+        "polls",
+        "multiple_choice",
+        "INTEGER NOT NULL DEFAULT 0"
+    );
+
+    saveDatabase();
+}
+
+// ======================================================
 // UTILIDADES
-// ===============================
+// ======================================================
 
-const $ = (id) => document.getElementById(id);
-
-async function api(path, options = {}) {
-    const config = {
-        credentials: "include",
-        ...options,
-        headers: {
-            ...(options.body ? { "Content-Type": "application/json" } : {}),
-            ...(options.headers || {})
-        }
-    };
-
-    const response = await fetch(API + path, config);
-
-    let data = null;
-
-    try {
-        data = await response.json();
-    } catch {
-        data = {};
+function cleanString(value, maxLength = 5000) {
+    if (typeof value !== "string") {
+        return "";
     }
 
-    if (!response.ok) {
-        throw new Error(data.error || data.message || "Ocorreu um erro.");
-    }
-
-    return data;
+    return value.trim().slice(0, maxLength);
 }
 
-function showMessage(element, message, type = "") {
-    if (!element) return;
-
-    element.textContent = message;
-    element.className = type;
-
-    if (message) {
-        setTimeout(() => {
-            if (element.textContent === message) {
-                element.textContent = "";
-            }
-        }, 5000);
-    }
+function normalizeEmail(email) {
+    return cleanString(email, 320).toLowerCase();
 }
 
-function toast(message, type = "") {
-    const element = $("toast");
-
-    if (!element) {
-        alert(message);
-        return;
-    }
-
-    element.textContent = message;
-    element.className = `toast ${type}`;
-
-    setTimeout(() => {
-        element.textContent = "";
-        element.className = "toast";
-    }, 3500);
+function hashToken(token) {
+    return crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
 }
 
-function escapeHTML(value = "") {
-    return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+function generateToken() {
+    return crypto.randomBytes(32).toString("hex");
 }
 
-function formatDate(value) {
-    if (!value) return "Não informado";
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return value;
-    }
-
-    return date.toLocaleString("pt-BR");
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function toISOStringFromInput(value) {
-    if (!value) return null;
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return value;
-    }
-
-    return date.toISOString();
-}
-
-function isAdmin() {
-    return state.me?.role === "admin";
-}
-
-function positionLabel(position) {
-    const positions = {
-        goleiro: "Goleiro",
-        fixo: "Fixo",
-        "ala-direita": "Ala direita",
-        "ala-esquerda": "Ala esquerda",
-        pivo: "Pivô"
-    };
-
-    return positions[position] || position;
-}
-
-function normalizePosition(position) {
-    const value = String(position || "")
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-
-    if (value.includes("goleiro")) return "goleiro";
-    if (value.includes("fixo")) return "fixo";
-    if (value.includes("direita")) return "ala-direita";
-    if (value.includes("esquerda")) return "ala-esquerda";
-    if (value.includes("pivo")) return "pivo";
-
-    return value;
-}
-
-function getPlayerName(playerId) {
-    const player = state.players.find(
-        player => Number(player.id) === Number(playerId)
-    );
-
-    return player ? player.name : "Jogador";
-}
-
-// ===============================
-// AUTENTICAÇÃO
-// ===============================
-
-function showAuthBox(boxId) {
-    ["loginBox", "registerBox", "forgotBox"].forEach(id => {
-        const element = $(id);
-        if (element) element.classList.add("hidden");
-    });
-
-    const box = $(boxId);
-
-    if (box) {
-        box.classList.remove("hidden");
-    }
-}
-
-function showLogin() {
-    showAuthBox("loginBox");
-}
-
-function showRegister() {
-    showAuthBox("registerBox");
-}
-
-function showForgotPassword() {
-    showAuthBox("forgotBox");
-}
-
-function showApp() {
-    $("authScreen")?.classList.add("hidden");
-    $("appScreen")?.classList.remove("hidden");
-}
-
-function showAuth() {
-    $("appScreen")?.classList.add("hidden");
-    $("authScreen")?.classList.remove("hidden");
-    showLogin();
-}
-
-async function checkSession() {
-    try {
-        const data = await api("/me");
-
-        state.me = data.user || data;
-
-        showApp();
-
-        await bootApplication();
-    } catch {
-        showAuth();
-    }
-}
-
-async function login(event) {
-    event.preventDefault();
-
-    const email = $("loginEmail")?.value.trim();
-    const password = $("loginPassword")?.value;
-
-    const message = $("loginMessage");
-
-    try {
-        await api("/login", {
-            method: "POST",
-            body: JSON.stringify({
-                email,
-                password
-            })
-        });
-
-        await checkSession();
-    } catch (error) {
-        showMessage(message, error.message, "err");
-    }
-}
-
-async function register(event) {
-    event.preventDefault();
-
-    const name = $("registerName")?.value.trim();
-    const email = $("registerEmail")?.value.trim();
-    const password = $("registerPassword")?.value;
-    const passwordConfirm = $("registerPasswordConfirm")?.value;
-
-    const message = $("registerMessage");
-
-    if (password !== passwordConfirm) {
-        showMessage(message, "As senhas não são iguais.", "err");
-        return;
-    }
-
-    try {
-        await api("/register", {
-            method: "POST",
-            body: JSON.stringify({
-                name,
-                email,
-                password
-            })
-        });
-
-        showMessage(
-            message,
-            "Conta criada! Agora você pode entrar.",
-            "ok"
-        );
-
-        $("registerForm")?.reset();
-
-        setTimeout(showLogin, 1000);
-    } catch (error) {
-        showMessage(message, error.message, "err");
-    }
-}
-
-async function forgotPassword(event) {
-    event.preventDefault();
-
-    const email = $("forgotEmail")?.value.trim();
-    const message = $("forgotMessage");
-
-    try {
-        await api("/forgot-password", {
-            method: "POST",
-            body: JSON.stringify({ email })
-        });
-
-        showMessage(
-            message,
-            "Se esse e-mail estiver cadastrado, enviaremos as instruções para redefinir a senha.",
-            "ok"
-        );
-    } catch (error) {
-        showMessage(message, error.message, "err");
-    }
-}
-
-async function logout() {
-    try {
-        await api("/logout", {
-            method: "POST"
-        });
-    } catch {
-        // Mesmo se der erro, vamos voltar para a tela de login.
-    }
-
-    state.me = null;
-    showAuth();
-}
-
-// ===============================
-// NAVEGAÇÃO
-// ===============================
-
-function getSectionElement(sectionName) {
+function isStrongEnoughPassword(password) {
     return (
-        document.getElementById(sectionName) ||
-        document.querySelector(
-            `.section[data-section="${sectionName}"]`
-        ) ||
-        document.querySelector(
-            `[data-section-panel="${sectionName}"]`
-        )
+        typeof password === "string" &&
+        password.length >= 8
     );
 }
 
-function navigate(sectionName) {
-    state.currentSection = sectionName;
+function setupAdminKeyValid(key) {
+    const configuredKey =
+        process.env.ADMIN_SETUP_KEY;
 
-    document.querySelectorAll(".nav-button").forEach(button => {
-        button.classList.toggle(
-            "active",
-            button.dataset.section === sectionName
-        );
-    });
-
-    document.querySelectorAll(".section").forEach(section => {
-        section.classList.add("hidden");
-    });
-
-    const section = getSectionElement(sectionName);
-
-    if (section) {
-        section.classList.remove("hidden");
+    if (!configuredKey) {
+        return false;
     }
-
-    if (sectionName === "dashboard") {
-        loadDashboard();
-    }
-
-    if (sectionName === "players") {
-        loadPlayers();
-    }
-
-    if (sectionName === "lineup") {
-        loadLineup();
-        loadMatchLineupEditor();
-    }
-
-    if (sectionName === "polls") {
-        loadPolls();
-    }
-
-    if (sectionName === "matches") {
-        loadMatches();
-    }
-
-    if (sectionName === "announcements") {
-        loadAnnouncements();
-    }
-
-    if (sectionName === "profile") {
-        loadProfile();
-    }
-
-    if (sectionName === "admin") {
-        loadMembers();
-        checkAdminSetup();
-    }
-}
-
-// ===============================
-// DASHBOARD
-// ===============================
-
-async function loadDashboard() {
-    try {
-        await Promise.all([
-            loadPlayers(),
-            loadMatches(),
-            loadPolls(),
-            loadAnnouncements()
-        ]);
-
-        if ($("welcomeName")) {
-            $("welcomeName").textContent =
-                state.me?.name || "Integrante";
-        }
-
-        if ($("dashboardPlayers")) {
-            $("dashboardPlayers").textContent =
-                state.players.length;
-        }
-
-        if ($("dashboardMatches")) {
-            $("dashboardMatches").textContent =
-                state.matches.length;
-        }
-
-        if ($("dashboardPolls")) {
-            $("dashboardPolls").textContent =
-                state.polls.length;
-        }
-
-        if ($("dashboardAnnouncements")) {
-            $("dashboardAnnouncements").textContent =
-                state.announcements.length;
-        }
-
-        const nextMatch = [...state.matches]
-            .filter(match => {
-                if (!match.match_date) return false;
-
-                return new Date(match.match_date) >= new Date();
-            })
-            .sort(
-                (a, b) =>
-                    new Date(a.match_date) -
-                    new Date(b.match_date)
-            )[0];
-
-        if ($("dashboardNextMatch")) {
-            $("dashboardNextMatch").textContent =
-                nextMatch
-                    ? `vs ${nextMatch.opponent} — ${formatDate(nextMatch.match_date)}`
-                    : "Nenhum próximo jogo.";
-        }
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-// ===============================
-// JOGADORES
-// ===============================
-
-async function loadPlayers() {
-    try {
-        const data = await api("/players");
-
-        state.players = Array.isArray(data)
-            ? data
-            : data.players || [];
-
-        renderPlayers();
-        renderCaptain();
-        renderRoleSelectors();
-        renderLineupEditor();
-        updatePlayerSelects();
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderPlayers() {
-    const container = $("playersList");
-
-    if (!container) return;
-
-    if (!state.players.length) {
-        container.innerHTML = `
-            <div class="item">
-                <strong>Nenhum jogador cadastrado.</strong>
-                <div class="muted">
-                    Um administrador pode adicionar os jogadores.
-                </div>
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML = state.players.map(player => {
-        const secondary = Array.isArray(player.secondary_positions)
-            ? player.secondary_positions
-            : [];
-
-        const positions = [
-            player.primary_position,
-            ...secondary
-        ]
-            .filter(Boolean)
-            .map(positionLabel)
-            .join(" • ");
-
-        return `
-            <div class="item player-item">
-                <div>
-                    <h3>
-                        ${escapeHTML(player.name)}
-                        ${
-                            player.number !== null &&
-                            player.number !== undefined
-                                ? `<span class="muted">#${escapeHTML(player.number)}</span>`
-                                : ""
-                        }
-                    </h3>
-
-                    <div class="muted">
-                        ${escapeHTML(positions || "Posição não definida")}
-                    </div>
-
-                    <div class="muted">
-                        Status: ${escapeHTML(player.status || "disponivel")}
-                    </div>
-
-                    ${
-                        Number(player.is_captain) === 1
-                            ? `<strong>👑 Capitão</strong>`
-                            : ""
-                    }
-
-                    ${
-                        player.instructions
-                            ? `
-                                <div class="muted">
-                                    Instruções:
-                                    ${escapeHTML(player.instructions)}
-                                </div>
-                            `
-                            : ""
-                    }
-                </div>
-
-                ${
-                    isAdmin()
-                        ? `
-                            <div class="player-actions">
-                                <button
-                                    class="ghost"
-                                    onclick="editPlayer(${player.id})"
-                                >
-                                    Editar
-                                </button>
-
-                                ${
-                                    Number(player.is_captain) !== 1
-                                        ? `
-                                            <button
-                                                class="ghost"
-                                                onclick="setCaptain(${player.id})"
-                                            >
-                                                Capitão
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-                                <button
-                                    class="danger"
-                                    onclick="deletePlayer(${player.id})"
-                                >
-                                    Excluir
-                                </button>
-                            </div>
-                        `
-                        : ""
-                }
-            </div>
-        `;
-    }).join("");
-}
-
-function renderCaptain() {
-    const captain = state.players.find(
-        player => Number(player.is_captain) === 1
-    );
-
-    if ($("captainName")) {
-        $("captainName").textContent =
-            captain?.name || "Nenhum capitão definido";
-    }
-
-    if ($("removeCaptainButton")) {
-        $("removeCaptainButton").style.display =
-            captain && isAdmin() ? "inline-block" : "none";
-    }
-}
-
-function openPlayerModal(player = null) {
-    if (!isAdmin()) return;
-
-    state.editingPlayerId = player?.id || null;
-
-    if ($("playerModalTitle")) {
-        $("playerModalTitle").textContent =
-            player
-                ? "Editar jogador"
-                : "Novo jogador";
-    }
-
-    $("playerId").value = player?.id || "";
-    $("playerName").value = player?.name || "";
-    $("playerNumber").value =
-        player?.number ?? "";
-    $("playerStatus").value =
-        player?.status || "disponivel";
-    $("playerPrimaryPosition").value =
-        player?.primary_position || "";
-
-    const secondary = Array.isArray(player?.secondary_positions)
-        ? player.secondary_positions
-        : [];
-
-    $("playerSecondaryPositions").value =
-        secondary.join(", ");
-
-    $("playerInstructions").value =
-        player?.instructions || "";
-
-    populatePlayerMemberSelect(player);
-
-    $("playerModal")?.classList.remove("hidden");
-}
-
-function closePlayerModal() {
-    $("playerModal")?.classList.add("hidden");
-    state.editingPlayerId = null;
-}
-
-function populatePlayerMemberSelect(player = null) {
-    const select = $("playerUser");
-
-    if (!select) return;
-
-    const linkedUserIds = new Set(
-        state.players
-            .filter(item => item.id !== player?.id)
-            .map(item => Number(item.user_id))
-            .filter(Boolean)
-    );
-
-    select.innerHTML = `
-        <option value="">
-            Jogador sem conta vinculada
-        </option>
-    `;
-
-    state.members.forEach(member => {
-        const alreadyLinked = linkedUserIds.has(Number(member.id));
-
-        if (alreadyLinked) return;
-
-        const selected =
-            Number(player?.user_id) === Number(member.id)
-                ? "selected"
-                : "";
-
-        select.innerHTML += `
-            <option value="${member.id}" ${selected}>
-                ${escapeHTML(member.name)}
-                — ${escapeHTML(member.email)}
-            </option>
-        `;
-    });
-}
-
-async function savePlayer(event) {
-    event.preventDefault();
-
-    if (!isAdmin()) return;
-
-    const id = $("playerId").value;
-
-    const secondaryPositions =
-        $("playerSecondaryPositions")
-            .value
-            .split(",")
-            .map(item => item.trim())
-            .filter(Boolean);
-
-    const numberValue = $("playerNumber").value.trim();
-
-    const body = {
-        name: $("playerName").value.trim(),
-        number: numberValue === ""
-            ? null
-            : Number(numberValue),
-        primary_position:
-            $("playerPrimaryPosition").value,
-        secondary_positions:
-            secondaryPositions,
-        status:
-            $("playerStatus").value,
-        instructions:
-            $("playerInstructions").value.trim()
-    };
-
-    const message = $("playerFormMessage");
-
-    try {
-        if (id) {
-            await api(`/players/${id}`, {
-                method: "PUT",
-                body: JSON.stringify(body)
-            });
-        } else {
-            await api("/players", {
-                method: "POST",
-                body: JSON.stringify(body)
-            });
-        }
-
-        toast(
-            id
-                ? "Jogador atualizado!"
-                : "Jogador criado!",
-            "ok"
-        );
-
-        closePlayerModal();
-
-        await loadPlayers();
-        await loadMembers();
-    } catch (error) {
-        showMessage(message, error.message, "err");
-    }
-}
-
-async function editPlayer(id) {
-    if (!isAdmin()) return;
-
-    const player = state.players.find(
-        item => Number(item.id) === Number(id)
-    );
-
-    if (!player) return;
-
-    openPlayerModal(player);
-}
-
-async function deletePlayer(id) {
-    if (!isAdmin()) return;
-
-    const player = state.players.find(
-        item => Number(item.id) === Number(id)
-    );
-
-    if (!player) return;
-
-    if (!confirm(`Excluir o jogador ${player.name}?`)) {
-        return;
-    }
-
-    try {
-        await api(`/players/${id}`, {
-            method: "DELETE"
-        });
-
-        toast("Jogador excluído.", "ok");
-
-        await loadPlayers();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-async function setCaptain(id) {
-    if (!isAdmin()) return;
-
-    try {
-        await api(`/players/${id}/captain`, {
-            method: "PUT"
-        });
-
-        toast("Capitão definido!", "ok");
-
-        await loadPlayers();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-async function removeCaptain() {
-    if (!isAdmin()) return;
-
-    try {
-        await api("/players/captain", {
-            method: "DELETE"
-        });
-
-        toast("Capitão removido.", "ok");
-
-        await loadPlayers();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-// ===============================
-// CONVERTER MEMBRO EM JOGADOR
-// ===============================
-
-async function convertMemberToPlayer(userId) {
-    if (!isAdmin()) return;
-
-    const member = state.members.find(
-        item => Number(item.id) === Number(userId)
-    );
-
-    if (!member) return;
 
     if (
-        !confirm(
-            `Transformar ${member.name} em jogador?`
-        )
+        !key ||
+        typeof key !== "string"
     ) {
-        return;
+        return false;
     }
 
-    try {
-        await api(`/players/from-member/${userId}`, {
-            method: "POST"
-        });
-
-        toast("Membro convertido em jogador!", "ok");
-
-        await loadMembers();
-        await loadPlayers();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-// ===============================
-// COBRANÇAS
-// ===============================
-
-async function loadRoles() {
-    try {
-        const data = await api("/player-roles");
-
-        state.roles = {
-            penalty: data.penalty || [],
-            free_kick: data.free_kick || []
-        };
-
-        renderRoleSelectors();
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderRoleSelectors() {
-    const penaltySelect = $("penaltySelect");
-    const freeKickSelect = $("freeKickSelect");
-
-    const createOptions = (selectedPlayers) => {
-        return state.players.map(player => {
-            const selected = selectedPlayers.some(
-                item =>
-                    Number(item.player_id ?? item.id) ===
-                    Number(player.id)
-            );
-
-            return `
-                <option
-                    value="${player.id}"
-                    ${selected ? "selected" : ""}
-                >
-                    ${escapeHTML(player.name)}
-                </option>
-            `;
-        }).join("");
-    };
-
-    if (penaltySelect) {
-        penaltySelect.innerHTML = createOptions(
-            state.roles.penalty
-        );
+    if (key.length !== configuredKey.length) {
+        return false;
     }
 
-    if (freeKickSelect) {
-        freeKickSelect.innerHTML = createOptions(
-            state.roles.free_kick
-        );
-    }
-
-    renderRoleNames();
-}
-
-function renderRoleNames() {
-    if ($("penaltyPlayers")) {
-        $("penaltyPlayers").textContent =
-            state.roles.penalty
-                .map(item => getPlayerName(item.player_id ?? item.id))
-                .join(" → ") ||
-            "Nenhum definido";
-    }
-
-    if ($("freeKickPlayers")) {
-        $("freeKickPlayers").textContent =
-            state.roles.free_kick
-                .map(item => getPlayerName(item.player_id ?? item.id))
-                .join(" → ") ||
-            "Nenhum definido";
-    }
-}
-
-async function saveRoles() {
-    if (!isAdmin()) return;
-
-    const penaltyPlayers =
-        [...($("penaltySelect")?.selectedOptions || [])]
-            .map(option => Number(option.value));
-
-    const freeKickPlayers =
-        [...($("freeKickSelect")?.selectedOptions || [])]
-            .map(option => Number(option.value));
-
-    try {
-        await api("/player-roles/penalty", {
-            method: "PUT",
-            body: JSON.stringify({
-                players: penaltyPlayers
-            })
-        });
-
-        await api("/player-roles/free_kick", {
-            method: "PUT",
-            body: JSON.stringify({
-                players: freeKickPlayers
-            })
-        });
-
-        await loadRoles();
-
-        showMessage(
-            $("rolesMessage"),
-            "Funções salvas!",
-            "ok"
-        );
-    } catch (error) {
-        showMessage(
-            $("rolesMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-// ===============================
-// ESCALAÇÃO PRINCIPAL
-// ===============================
-
-const LINEUP_POSITIONS = [
-    {
-        key: "goleiro",
-        label: "Goleiro"
-    },
-    {
-        key: "fixo",
-        label: "Fixo"
-    },
-    {
-        key: "ala-direita",
-        label: "Ala direita"
-    },
-    {
-        key: "ala-esquerda",
-        label: "Ala esquerda"
-    },
-    {
-        key: "pivo",
-        label: "Pivô"
-    }
-];
-
-let currentLineup = [];
-
-async function loadLineup() {
-    try {
-        const data = await api("/lineup");
-
-        currentLineup = Array.isArray(data)
-            ? data
-            : data.lineup || [];
-
-        renderCourt();
-        renderLineupEditor();
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function getCurrentLineupPlayer(position) {
-    return currentLineup.find(
-        item =>
-            normalizePosition(item.position) ===
-            normalizePosition(position)
+    return crypto.timingSafeEqual(
+        Buffer.from(key),
+        Buffer.from(configuredKey)
     );
 }
 
-function renderCourt() {
-    document
-        .querySelectorAll(".court-player")
-        .forEach(element => {
-            const position =
-                element.dataset.position ||
-                element.dataset.playerPosition;
-
-            const lineupPlayer =
-                getCurrentLineupPlayer(position);
-
-            const name =
-                lineupPlayer?.player_name ||
-                lineupPlayer?.name ||
-                "—";
-
-            element.textContent = name;
-            element.title = name;
-        });
-}
-
-function renderLineupEditor() {
-    const container = $("lineupEditor");
-
-    if (!container) return;
-
-    if (!state.players.length) {
-        container.innerHTML = `
-            <p class="muted">
-                Cadastre jogadores primeiro.
-            </p>
-        `;
-
-        return;
-    }
-
-    const usedPlayers = new Set();
-
-    container.innerHTML = LINEUP_POSITIONS.map(position => {
-        const current =
-            getCurrentLineupPlayer(position.key);
-
-        const currentName =
-            current?.player_name ||
-            current?.name ||
-            "";
-
-        const currentPlayer =
-            state.players.find(
-                player => player.name === currentName
-            );
-
-        if (currentPlayer) {
-            usedPlayers.add(currentPlayer.id);
-        }
-
-        return `
-            <label>
-                ${position.label}
-
-                <select
-                    class="lineup-position-select"
-                    data-position="${position.key}"
-                >
-                    <option value="">
-                        Nenhum jogador
-                    </option>
-
-                    ${state.players.map(player => `
-                        <option
-                            value="${player.id}"
-                            ${
-                                Number(player.id) ===
-                                Number(currentPlayer?.id)
-                                    ? "selected"
-                                    : ""
-                            }
-                        >
-                            ${
-                                player.number !== null &&
-                                player.number !== undefined
-                                    ? `#${player.number} `
-                                    : ""
-                            }
-                            ${escapeHTML(player.name)}
-                        </option>
-                    `).join("")}
-                </select>
-            </label>
-        `;
-    }).join("");
-}
-
-async function saveLineup() {
-    if (!isAdmin()) return;
-
-    const selects = [
-        ...document.querySelectorAll(
-            ".lineup-position-select"
-        )
-    ];
-
-    const lineup = [];
-    const selectedIds = new Set();
-
-    for (const select of selects) {
-        const playerId = select.value;
-
-        if (!playerId) continue;
-
-        if (selectedIds.has(playerId)) {
-            showMessage(
-                $("lineupMessage"),
-                "Um jogador não pode ocupar duas posições.",
-                "err"
-            );
-
-            return;
-        }
-
-        selectedIds.add(playerId);
-
-        const player = state.players.find(
-            item => Number(item.id) === Number(playerId)
-        );
-
-        if (!player) continue;
-
-        lineup.push({
-            player_name: player.name,
-            position: select.dataset.position,
-            status: "titular",
-            number: player.number,
-            notes: player.instructions || ""
-        });
-    }
-
-    state.players
-        .filter(player => !selectedIds.has(String(player.id)))
-        .forEach(player => {
-            lineup.push({
-                player_name: player.name,
-                position: player.primary_position || "",
-                status: "reserva",
-                number: player.number,
-                notes: player.instructions || ""
-            });
-        });
-
-    if (
-        lineup.filter(
-            item => item.status === "titular"
-        ).length > 5
-    ) {
-        showMessage(
-            $("lineupMessage"),
-            "A escalação pode ter no máximo 5 titulares.",
-            "err"
-        );
-
-        return;
-    }
-
+function parseJSON(value, fallback = []) {
     try {
-        await api("/lineup", {
-            method: "PUT",
-            body: JSON.stringify({
-                lineup
-            })
-        });
-
-        showMessage(
-            $("lineupMessage"),
-            "Escalação salva!",
-            "ok"
-        );
-
-        await loadLineup();
-    } catch (error) {
-        showMessage(
-            $("lineupMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-// ===============================
-// ESCALAÇÃO POR PARTIDA
-// ===============================
-
-function updateMatchSelect() {
-    const select = $("lineupMatchSelect");
-
-    if (!select) return;
-
-    const current = select.value;
-
-    select.innerHTML = `
-        <option value="">
-            Escolha uma partida
-        </option>
-    `;
-
-    state.matches.forEach(match => {
-        select.innerHTML += `
-            <option value="${match.id}">
-                vs ${escapeHTML(match.opponent)}
-                — ${formatDate(match.match_date)}
-            </option>
-        `;
-    });
-
-    if (current) {
-        select.value = current;
-    }
-}
-
-async function loadMatchLineupEditor() {
-    updateMatchSelect();
-
-    const select = $("lineupMatchSelect");
-
-    if (!select?.value) {
-        renderMatchLineupEditor([]);
-        return;
-    }
-
-    try {
-        const data = await api(
-            `/matches/${select.value}/lineup`
-        );
-
-        renderMatchLineupEditor(
-            Array.isArray(data)
-                ? data
-                : data.lineup || []
-        );
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderMatchLineupEditor(existing = []) {
-    const container = $("matchLineupEditor");
-
-    if (!container) return;
-
-    const starters = existing.filter(
-        item => Number(item.starter) === 1
-    );
-
-    container.innerHTML = `
-        ${LINEUP_POSITIONS.map(position => {
-            const current = starters.find(
-                item =>
-                    normalizePosition(item.position) ===
-                    position.key
-            );
-
-            return `
-                <label>
-                    ${position.label}
-
-                    <select
-                        class="match-position-select"
-                        data-position="${position.key}"
-                    >
-                        <option value="">
-                            Nenhum jogador
-                        </option>
-
-                        ${state.players.map(player => `
-                            <option
-                                value="${player.id}"
-                                ${
-                                    Number(player.id) ===
-                                    Number(current?.player_id)
-                                        ? "selected"
-                                        : ""
-                                }
-                            >
-                                ${
-                                    player.number !== null &&
-                                    player.number !== undefined
-                                        ? `#${player.number} `
-                                        : ""
-                                }
-                                ${escapeHTML(player.name)}
-                            </option>
-                        `).join("")}
-                    </select>
-                </label>
-            `;
-        }).join("")}
-
-        <div class="item">
-            <strong>Instruções da partida</strong>
-
-            ${LINEUP_POSITIONS.map(position => `
-                <label>
-                    ${position.label}
-
-                    <input
-                        type="text"
-                        class="match-instruction"
-                        data-position="${position.key}"
-                        placeholder="Ex.: ficar mais recuado"
-                    >
-                </label>
-            `).join("")}
-        </div>
-    `;
-}
-
-async function saveMatchLineup() {
-    if (!isAdmin()) return;
-
-    const matchId = $("lineupMatchSelect")?.value;
-
-    if (!matchId) {
-        showMessage(
-            $("matchLineupMessage"),
-            "Escolha uma partida.",
-            "err"
-        );
-
-        return;
-    }
-
-    const selects = [
-        ...document.querySelectorAll(
-            ".match-position-select"
-        )
-    ];
-
-    const lineup = [];
-    const selectedIds = new Set();
-
-    for (const select of selects) {
-        if (!select.value) continue;
-
-        if (selectedIds.has(select.value)) {
-            showMessage(
-                $("matchLineupMessage"),
-                "Um jogador não pode ocupar duas posições.",
-                "err"
-            );
-
-            return;
-        }
-
-        selectedIds.add(select.value);
-
-        const player = state.players.find(
-            item => Number(item.id) === Number(select.value)
-        );
-
-        if (!player) continue;
-
-        const instruction = document.querySelector(
-            `.match-instruction[data-position="${select.dataset.position}"]`
-        );
-
-        lineup.push({
-            player_id: player.id,
-            position: select.dataset.position,
-            starter: 1,
-            instructions:
-                instruction?.value.trim() ||
-                player.instructions ||
-                ""
-        });
-    }
-
-    if (lineup.length > 5) {
-        showMessage(
-            $("matchLineupMessage"),
-            "A partida pode ter no máximo 5 titulares.",
-            "err"
-        );
-
-        return;
-    }
-
-    try {
-        await api(`/matches/${matchId}/lineup`, {
-            method: "PUT",
-            body: JSON.stringify({
-                lineup
-            })
-        });
-
-        showMessage(
-            $("matchLineupMessage"),
-            "Escalação da partida salva!",
-            "ok"
-        );
-
-        await loadMatchLineupEditor();
-    } catch (error) {
-        showMessage(
-            $("matchLineupMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-// ===============================
-// ENQUETES
-// ===============================
-
-function renderPollOptionInputs() {
-    const container = $("pollOptions");
-
-    if (!container) return;
-
-    if (!container.querySelector(".poll-option")) {
-        container.innerHTML = `
-            <input
-                class="poll-option"
-                type="text"
-                placeholder="Opção 1"
-            >
-
-            <input
-                class="poll-option"
-                type="text"
-                placeholder="Opção 2"
-            >
-        `;
-    }
-}
-
-function addPollOption() {
-    const container = $("pollOptions");
-
-    if (!container) return;
-
-    const count =
-        container.querySelectorAll(".poll-option").length;
-
-    const input = document.createElement("input");
-
-    input.type = "text";
-    input.className = "poll-option";
-    input.placeholder = `Opção ${count + 1}`;
-
-    container.appendChild(input);
-}
-
-async function loadPolls() {
-    try {
-        const data = await api("/polls");
-
-        state.polls = Array.isArray(data)
-            ? data
-            : data.polls || [];
-
-        renderPolls();
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderPolls() {
-    const container = $("pollsList");
-
-    if (!container) return;
-
-    if (!state.polls.length) {
-        container.innerHTML = `
-            <div class="item">
-                Nenhuma enquete criada.
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML = state.polls.map(poll => {
-        const closed =
-            poll.closes_at &&
-            new Date(poll.closes_at) <= new Date();
-
-        const options = poll.options || [];
-
-        return `
-            <div class="item poll">
-                <h3>${escapeHTML(poll.question)}</h3>
-
-                <div class="muted">
-                    ${
-                        closed
-                            ? "Enquete encerrada"
-                            : `Fecha em ${formatDate(poll.closes_at)}`
-                    }
-                </div>
-
-                <form
-                    onsubmit="votePoll(event, ${poll.id})"
-                >
-                    ${options.map(option => {
-                        const inputType =
-                            poll.multiple_choice
-                                ? "checkbox"
-                                : "radio";
-
-                        return `
-                            <label class="choice">
-                                <input
-                                    type="${inputType}"
-                                    name="poll-${poll.id}"
-                                    value="${option.id}"
-                                    ${
-                                        option.voted
-                                            ? "checked"
-                                            : ""
-                                    }
-                                    ${
-                                        closed ||
-                                        poll.has_voted
-                                            ? "disabled"
-                                            : ""
-                                    }
-                                >
-
-                                ${escapeHTML(option.text)}
-
-                                ${
-                                    option.votes !== undefined
-                                        ? `
-                                            <span class="muted">
-                                                — ${option.votes} voto(s)
-                                            </span>
-                                        `
-                                        : ""
-                                }
-                            </label>
-                        `;
-                    }).join("")}
-
-                    ${
-                        !closed && !poll.has_voted
-                            ? `
-                                <button type="submit">
-                                    Votar
-                                </button>
-                            `
-                            : ""
-                    }
-                </form>
-
-                ${
-                    isAdmin()
-                        ? `
-                            <button
-                                class="danger"
-                                onclick="deletePoll(${poll.id})"
-                            >
-                                Excluir enquete
-                            </button>
-                        `
-                        : ""
-                }
-            </div>
-        `;
-    }).join("");
-}
-
-async function votePoll(event, pollId) {
-    event.preventDefault();
-
-    const form = event.target;
-
-    const selected = [
-        ...form.querySelectorAll(
-            `input[name="poll-${pollId}"]:checked`
-        )
-    ].map(input => Number(input.value));
-
-    if (!selected.length) {
-        toast("Escolha uma opção.", "err");
-        return;
-    }
-
-    try {
-        await api(`/polls/${pollId}/vote`, {
-            method: "POST",
-            body: JSON.stringify({
-                option_ids: selected
-            })
-        });
-
-        toast("Voto registrado!", "ok");
-
-        await loadPolls();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-async function createPoll(event) {
-    event.preventDefault();
-
-    if (!isAdmin()) return;
-
-    const question =
-        $("pollQuestion").value.trim();
-
-    const options =
-        [...document.querySelectorAll(".poll-option")]
-            .map(input => input.value.trim())
-            .filter(Boolean);
-
-    const closesAt =
-        $("pollCloseDate").value;
-
-    if (options.length < 2) {
-        showMessage(
-            $("pollMessage"),
-            "A enquete precisa de pelo menos 2 opções.",
-            "err"
-        );
-
-        return;
-    }
-
-    try {
-        await api("/polls", {
-            method: "POST",
-            body: JSON.stringify({
-                question,
-                options,
-                closes_at:
-                    toISOStringFromInput(closesAt),
-                multiple_choice:
-                    $("pollMultiple").checked
-            })
-        });
-
-        showMessage(
-            $("pollMessage"),
-            "Enquete criada!",
-            "ok"
-        );
-
-        $("pollForm").reset();
-
-        $("pollCreateBox")?.classList.add("hidden");
-
-        await loadPolls();
-    } catch (error) {
-        showMessage(
-            $("pollMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-async function deletePoll(id) {
-    if (!isAdmin()) return;
-
-    if (!confirm("Excluir esta enquete?")) {
-        return;
-    }
-
-    try {
-        await api(`/polls/${id}`, {
-            method: "DELETE"
-        });
-
-        toast("Enquete excluída.", "ok");
-
-        await loadPolls();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-// ===============================
-// PARTIDAS
-// ===============================
-
-async function loadMatches() {
-    try {
-        const data = await api("/matches");
-
-        state.matches = Array.isArray(data)
-            ? data
-            : data.matches || [];
-
-        renderMatches();
-        updateMatchSelect();
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderMatches() {
-    const container = $("matchesList");
-
-    if (!container) return;
-
-    if (!state.matches.length) {
-        container.innerHTML = `
-            <div class="item">
-                Nenhuma partida cadastrada.
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML = state.matches.map(match => `
-        <div class="item">
-            <h3>
-                Beiçola F.I. ×
-                ${escapeHTML(match.opponent)}
-            </h3>
-
-            <div class="muted">
-                ${formatDate(match.match_date)}
-            </div>
-
-            ${
-                match.location
-                    ? `
-                        <div class="muted">
-                            Local: ${escapeHTML(match.location)}
-                        </div>
-                    `
-                    : ""
-            }
-
-            ${
-                match.result
-                    ? `
-                        <div>
-                            Resultado:
-                            <strong>
-                                ${escapeHTML(match.result)}
-                            </strong>
-                        </div>
-                    `
-                    : ""
-            }
-
-            ${
-                match.notes
-                    ? `
-                        <div class="muted">
-                            ${escapeHTML(match.notes)}
-                        </div>
-                    `
-                    : ""
-            }
-
-            ${
-                isAdmin()
-                    ? `
-                        <button
-                            class="danger"
-                            onclick="deleteMatch(${match.id})"
-                        >
-                            Excluir
-                        </button>
-                    `
-                    : ""
-            }
-        </div>
-    `).join("");
-}
-
-async function createMatch(event) {
-    event.preventDefault();
-
-    if (!isAdmin()) return;
-
-    const body = {
-        opponent:
-            $("matchOpponent").value.trim(),
-
-        match_date:
-            toISOStringFromInput(
-                $("matchDate").value
-            ),
-
-        location:
-            $("matchLocation").value.trim(),
-
-        result:
-            $("matchResult").value.trim(),
-
-        notes:
-            $("matchNotes").value.trim()
-    };
-
-    try {
-        await api("/matches", {
-            method: "POST",
-            body: JSON.stringify(body)
-        });
-
-        showMessage(
-            $("matchMessage"),
-            "Partida criada!",
-            "ok"
-        );
-
-        $("matchForm").reset();
-
-        $("matchCreateBox")?.classList.add("hidden");
-
-        await loadMatches();
-    } catch (error) {
-        showMessage(
-            $("matchMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-async function deleteMatch(id) {
-    if (!isAdmin()) return;
-
-    if (!confirm("Excluir esta partida?")) {
-        return;
-    }
-
-    try {
-        await api(`/matches/${id}`, {
-            method: "DELETE"
-        });
-
-        toast("Partida excluída.", "ok");
-
-        await loadMatches();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-// ===============================
-// AVISOS
-// ===============================
-
-async function loadAnnouncements() {
-    try {
-        const data = await api("/announcements");
-
-        state.announcements =
-            Array.isArray(data)
-                ? data
-                : data.announcements || [];
-
-        renderAnnouncements();
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderAnnouncements() {
-    const container = $("announcementsList");
-
-    if (!container) return;
-
-    if (!state.announcements.length) {
-        container.innerHTML = `
-            <div class="item">
-                Nenhum aviso publicado.
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML =
-        state.announcements.map(announcement => `
-            <div class="item">
-                <h3>
-                    ${escapeHTML(announcement.title)}
-                </h3>
-
-                <div class="muted">
-                    ${formatDate(announcement.created_at)}
-                </div>
-
-                <p>
-                    ${escapeHTML(announcement.content)}
-                </p>
-
-                ${
-                    isAdmin()
-                        ? `
-                            <button
-                                class="danger"
-                                onclick="deleteAnnouncement(${announcement.id})"
-                            >
-                                Excluir
-                            </button>
-                        `
-                        : ""
-                }
-            </div>
-        `).join("");
-}
-
-async function createAnnouncement(event) {
-    event.preventDefault();
-
-    if (!isAdmin()) return;
-
-    try {
-        await api("/announcements", {
-            method: "POST",
-            body: JSON.stringify({
-                title:
-                    $("announcementTitle").value.trim(),
-
-                content:
-                    $("announcementContent").value.trim()
-            })
-        });
-
-        showMessage(
-            $("announcementMessage"),
-            "Aviso publicado!",
-            "ok"
-        );
-
-        $("announcementForm").reset();
-
-        $("announcementCreateBox")
-            ?.classList.add("hidden");
-
-        await loadAnnouncements();
-    } catch (error) {
-        showMessage(
-            $("announcementMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-async function deleteAnnouncement(id) {
-    if (!isAdmin()) return;
-
-    if (!confirm("Excluir este aviso?")) {
-        return;
-    }
-
-    try {
-        await api(`/announcements/${id}`, {
-            method: "DELETE"
-        });
-
-        toast("Aviso excluído.", "ok");
-
-        await loadAnnouncements();
-    } catch (error) {
-        toast(error.message, "err");
-    }
-}
-
-// ===============================
-// PERFIL
-// ===============================
-
-async function loadProfile() {
-    try {
-        const data = await api("/profile");
-
-        const profile =
-            data.user ||
-            data.profile ||
-            data;
-
-        if ($("profileName")) {
-            $("profileName").value =
-                profile.name || "";
-        }
-
-        if ($("profileEmail")) {
-            $("profileEmail").value =
-                profile.email || "";
-        }
-
-        if ($("profileRole")) {
-            $("profileRole").value =
-                profile.role || "";
-        }
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-async function updateProfile(event) {
-    event.preventDefault();
-
-    try {
-        const data = await api("/profile", {
-            method: "PUT",
-            body: JSON.stringify({
-                name:
-                    $("profileName").value.trim()
-            })
-        });
-
-        state.me = data.user || {
-            ...state.me,
-            name: $("profileName").value.trim()
-        };
-
-        if ($("headerUserName")) {
-            $("headerUserName").textContent =
-                state.me.name;
-        }
-
-        showMessage(
-            $("profileMessage"),
-            "Perfil atualizado!",
-            "ok"
-        );
-    } catch (error) {
-        showMessage(
-            $("profileMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-async function changePassword(event) {
-    event.preventDefault();
-
-    const currentPassword =
-        $("currentPassword").value;
-
-    const newPassword =
-        $("newPassword").value;
-
-    const confirmPassword =
-        $("confirmNewPassword").value;
-
-    if (newPassword !== confirmPassword) {
-        showMessage(
-            $("passwordMessage"),
-            "As novas senhas não são iguais.",
-            "err"
-        );
-
-        return;
-    }
-
-    try {
-        await api("/change-password", {
-            method: "POST",
-            body: JSON.stringify({
-                currentPassword,
-                newPassword
-            })
-        });
-
-        showMessage(
-            $("passwordMessage"),
-            "Senha alterada com sucesso!",
-            "ok"
-        );
-
-        $("passwordForm").reset();
-    } catch (error) {
-        showMessage(
-            $("passwordMessage"),
-            error.message,
-            "err"
-        );
-    }
-}
-
-// ===============================
-// ADMINISTRAÇÃO
-// ===============================
-
-async function loadMembers() {
-    if (!isAdmin()) return;
-
-    try {
-        const data = await api("/members");
-
-        state.members = Array.isArray(data)
-            ? data
-            : data.members || [];
-
-        renderMembers();
-        populatePlayerMemberSelect(
-            state.editingPlayerId
-                ? state.players.find(
-                    player =>
-                        Number(player.id) ===
-                        Number(state.editingPlayerId)
-                )
-                : null
-        );
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-function renderMembers() {
-    const container = $("membersList");
-
-    if (!container) return;
-
-    if (!state.members.length) {
-        container.innerHTML = `
-            <div class="item">
-                Nenhum membro encontrado.
-            </div>
-        `;
-
-        return;
-    }
-
-    const playerUserIds = new Set(
-        state.players
-            .map(player => Number(player.user_id))
-            .filter(Boolean)
-    );
-
-    container.innerHTML =
-        state.members.map(member => {
-            const isPlayer =
-                playerUserIds.has(Number(member.id));
-
-            return `
-                <div class="item">
-                    <strong>
-                        ${escapeHTML(member.name)}
-                    </strong>
-
-                    <div class="muted">
-                        ${escapeHTML(member.email)}
-                    </div>
-
-                    <div class="muted">
-                        Função:
-                        ${member.role === "admin"
-                            ? "Administrador"
-                            : "Integrante"}
-                    </div>
-
-                    ${
-                        !isPlayer
-                            ? `
-                                <button
-                                    class="ghost"
-                                    onclick="convertMemberToPlayer(${member.id})"
-                                >
-                                    Tornar jogador
-                                </button>
-                            `
-                            : `
-                                <span class="muted">
-                                    Já é jogador
-                                </span>
-                            `
-                    }
-                </div>
-            `;
-        }).join("");
-}
-
-async function checkAdminSetup() {
-    const box = $("setupAdminBox");
-
-    if (!box) return;
-
-    try {
-        const data =
-            await api("/setup-admin/status");
-
-        if (data.available) {
-            box.classList.remove("hidden");
-        } else {
-            box.classList.add("hidden");
-        }
+        return JSON.parse(value);
     } catch {
-        box.classList.add("hidden");
+        return fallback;
     }
 }
 
-async function setupAdmin(event) {
-    event.preventDefault();
-
-    const message =
-        $("setupAdminMessage");
-
-    try {
-        await api("/setup-admin", {
-            method: "POST",
-            body: JSON.stringify({
-                key:
-                    $("setupAdminKey").value,
-
-                name:
-                    $("setupAdminName").value.trim(),
-
-                email:
-                    $("setupAdminEmail").value.trim(),
-
-                password:
-                    $("setupAdminPassword").value
-            })
-        });
-
-        showMessage(
-            message,
-            "Administrador criado com sucesso!",
-            "ok"
-        );
-
-        $("setupAdminForm").reset();
-
-        setTimeout(() => {
-            checkSession();
-        }, 1000);
-    } catch (error) {
-        showMessage(
-            message,
-            error.message,
-            "err"
+function normalizeSecondaryPositions(value) {
+    if (Array.isArray(value)) {
+        return JSON.stringify(
+            value
+                .map(item => cleanString(item, 100))
+                .filter(Boolean)
         );
     }
+
+    if (typeof value === "string") {
+        return JSON.stringify(
+            value
+                .split(",")
+                .map(item => item.trim())
+                .filter(Boolean)
+        );
+    }
+
+    return "[]";
 }
 
-// ===============================
-// FORMULÁRIOS E BOTÕES
-// ===============================
+function publicUser(user) {
+    if (!user) return null;
 
-function setupEvents() {
-    $("loginForm")?.addEventListener(
-        "submit",
-        login
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        created_at: user.created_at
+    };
+}
+
+function publicPlayer(player) {
+    if (!player) return null;
+
+    return {
+        ...player,
+        secondary_positions:
+            parseJSON(
+                player.secondary_positions,
+                []
+            )
+    };
+}
+
+function sessionCookieOptions() {
+    return {
+        httpOnly: true,
+        secure: NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/"
+    };
+}
+
+// ======================================================
+// AUTENTICAÇÃO
+// ======================================================
+
+function createSession(userId) {
+    const token = generateToken();
+    const tokenHash = hashToken(token);
+
+    const expiresAt = new Date(
+        Date.now() +
+        7 * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    run(
+        `
+            INSERT INTO sessions
+            (user_id, token_hash, expires_at)
+            VALUES (?, ?, ?)
+        `,
+        [
+            userId,
+            tokenHash,
+            expiresAt
+        ]
     );
 
-    $("registerForm")?.addEventListener(
-        "submit",
-        register
+    saveDatabase();
+
+    return token;
+}
+
+function getSessionUser(req) {
+    const token =
+        req.cookies?.beicola_session;
+
+    if (!token) {
+        return null;
+    }
+
+    const tokenHash = hashToken(token);
+
+    const session = get(
+        `
+            SELECT
+                sessions.id AS session_id,
+                sessions.expires_at,
+                users.*
+            FROM sessions
+            JOIN users
+                ON users.id = sessions.user_id
+            WHERE sessions.token_hash = ?
+        `,
+        [tokenHash]
     );
 
-    $("forgotForm")?.addEventListener(
-        "submit",
-        forgotPassword
-    );
+    if (!session) {
+        return null;
+    }
 
-    $("showRegister")?.addEventListener(
-        "click",
-        showRegister
-    );
+    if (
+        new Date(session.expires_at) <=
+        new Date()
+    ) {
+        run(
+            "DELETE FROM sessions WHERE id = ?",
+            [session.session_id]
+        );
 
-    $("showForgotPassword")?.addEventListener(
-        "click",
-        showForgotPassword
-    );
+        saveDatabase();
 
-    $("backToLogin")?.addEventListener(
-        "click",
-        showLogin
-    );
+        return null;
+    }
 
-    $("forgotBackLogin")?.addEventListener(
-        "click",
-        showLogin
-    );
+    return session;
+}
 
-    $("logoutButton")?.addEventListener(
-        "click",
-        logout
-    );
+function requireAuth(req, res, next) {
+    const user = getSessionUser(req);
 
-    document
-        .querySelectorAll(".nav-button")
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                () => navigate(button.dataset.section)
-            );
+    if (!user) {
+        return res.status(401).json({
+            error: "Você precisa estar logado."
         });
+    }
 
-    $("newPlayerButton")?.addEventListener(
-        "click",
-        () => openPlayerModal()
-    );
+    req.user = user;
 
-    $("closePlayerModal")?.addEventListener(
-        "click",
-        closePlayerModal
-    );
-
-    $("cancelPlayerButton")?.addEventListener(
-        "click",
-        closePlayerModal
-    );
-
-    $("playerForm")?.addEventListener(
-        "submit",
-        savePlayer
-    );
-
-    $("removeCaptainButton")?.addEventListener(
-        "click",
-        removeCaptain
-    );
-
-    $("saveRolesButton")?.addEventListener(
-        "click",
-        saveRoles
-    );
-
-    $("saveLineupButton")?.addEventListener(
-        "click",
-        saveLineup
-    );
-
-    $("lineupMatchSelect")?.addEventListener(
-        "change",
-        loadMatchLineupEditor
-    );
-
-    $("saveMatchLineupButton")?.addEventListener(
-        "click",
-        saveMatchLineup
-    );
-
-    $("newPollButton")?.addEventListener(
-        "click",
-        () => {
-            $("pollCreateBox")?.classList.remove(
-                "hidden"
-            );
-
-            renderPollOptionInputs();
-        }
-    );
-
-    $("cancelPollButton")?.addEventListener(
-        "click",
-        () => {
-            $("pollCreateBox")?.classList.add(
-                "hidden"
-            );
-        }
-    );
-
-    $("addPollOptionButton")?.addEventListener(
-        "click",
-        addPollOption
-    );
-
-    $("pollForm")?.addEventListener(
-        "submit",
-        createPoll
-    );
-
-    $("newMatchButton")?.addEventListener(
-        "click",
-        () => {
-            $("matchCreateBox")?.classList.remove(
-                "hidden"
-            );
-        }
-    );
-
-    $("cancelMatchButton")?.addEventListener(
-        "click",
-        () => {
-            $("matchCreateBox")?.classList.add(
-                "hidden"
-            );
-        }
-    );
-
-    $("matchForm")?.addEventListener(
-        "submit",
-        createMatch
-    );
-
-    $("newAnnouncementButton")?.addEventListener(
-        "click",
-        () => {
-            $("announcementCreateBox")
-                ?.classList.remove("hidden");
-        }
-    );
-
-    $("cancelAnnouncementButton")?.addEventListener(
-        "click",
-        () => {
-            $("announcementCreateBox")
-                ?.classList.add("hidden");
-        }
-    );
-
-    $("announcementForm")?.addEventListener(
-        "submit",
-        createAnnouncement
-    );
-
-    $("profileForm")?.addEventListener(
-        "submit",
-        updateProfile
-    );
-
-    $("passwordForm")?.addEventListener(
-        "submit",
-        changePassword
-    );
-
-    $("setupAdminForm")?.addEventListener(
-        "submit",
-        setupAdmin
-    );
+    next();
 }
 
-// ===============================
-// INICIALIZAÇÃO
-// ===============================
-
-async function bootApplication() {
-    if (!state.me) return;
-
-    if ($("headerUserName")) {
-        $("headerUserName").textContent =
-            state.me.name || "";
-    }
-
-    if ($("headerUserRole")) {
-        $("headerUserRole").textContent =
-            state.me.role === "admin"
-                ? "Administrador"
-                : "Integrante";
-    }
-
-    document
-        .querySelectorAll(".admin-only")
-        .forEach(element => {
-            element.classList.toggle(
-                "hidden",
-                !isAdmin()
-            );
+function requireAdmin(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({
+            error: "Não autenticado."
         });
-
-    await Promise.all([
-        loadPlayers(),
-        loadRoles(),
-        loadMatches(),
-        loadPolls(),
-        loadAnnouncements()
-    ]);
-
-    if (isAdmin()) {
-        await loadMembers();
     }
 
-    await loadLineup();
+    if (req.user.role !== "admin") {
+        return res.status(403).json({
+            error: "Apenas administradores podem fazer isso."
+        });
+    }
 
-    updateMatchSelect();
-
-    navigate(state.currentSection);
+    next();
 }
 
-// ===============================
-// INÍCIO
-// ===============================
+// ======================================================
+// E-MAIL
+// ======================================================
 
-document.addEventListener(
-    "DOMContentLoaded",
-    async () => {
-        setupEvents();
-        renderPollOptionInputs();
-        await checkSession();
+async function sendPasswordResetEmail(
+    email,
+    resetUrl
+) {
+    if (!transporter) {
+        console.log(
+            "SMTP não configurado. Link de recuperação:",
+            resetUrl
+        );
+
+        return;
+    }
+
+    await transporter.sendMail({
+        from:
+            process.env.MAIL_FROM ||
+            process.env.SMTP_USER,
+
+        to: email,
+
+        subject:
+            "Redefinição de senha — Beiçola F.I.",
+
+        text:
+            `Olá!\n\n` +
+            `Recebemos uma solicitação para redefinir sua senha no Beiçola F.I.\n\n` +
+            `Acesse o link abaixo:\n\n` +
+            `${resetUrl}\n\n` +
+            `Se você não solicitou isso, ignore este e-mail.`
+    });
+}
+
+// ======================================================
+// ROTAS BÁSICAS
+// ======================================================
+
+app.get("/api/health", (req, res) => {
+    res.json({
+        ok: true,
+        service: "Beiçola F.I."
+    });
+});
+
+app.get("/api/me", requireAuth, (req, res) => {
+    res.json({
+        user: publicUser(req.user)
+    });
+});
+
+// ======================================================
+// LOGIN
+// ======================================================
+
+app.post(
+    "/api/login",
+    loginLimiter,
+    async (req, res) => {
+        try {
+            const email =
+                normalizeEmail(req.body.email);
+
+            const password =
+                req.body.password;
+
+            if (
+                !email ||
+                !password
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Informe e-mail e senha."
+                });
+            }
+
+            const user = get(
+                `
+                    SELECT *
+                    FROM users
+                    WHERE email = ?
+                `,
+                [email]
+            );
+
+            if (!user) {
+                return res.status(401).json({
+                    error:
+                        "E-mail ou senha incorretos."
+                });
+            }
+
+            const valid =
+                await bcrypt.compare(
+                    password,
+                    user.password_hash
+                );
+
+            if (!valid) {
+                return res.status(401).json({
+                    error:
+                        "E-mail ou senha incorretos."
+                });
+            }
+
+            const token =
+                createSession(user.id);
+
+            res.cookie(
+                "beicola_session",
+                token,
+                sessionCookieOptions()
+            );
+
+            res.json({
+                user: publicUser(user)
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível fazer login."
+            });
+        }
     }
 );
 
-// ===============================
-// FUNÇÕES GLOBAIS
-// ===============================
+// ======================================================
+// CADASTRO
+// ======================================================
 
-window.editPlayer = editPlayer;
-window.deletePlayer = deletePlayer;
-window.setCaptain = setCaptain;
-window.convertMemberToPlayer = convertMemberToPlayer;
-window.votePoll = votePoll;
-window.deletePoll = deletePoll;
-window.deleteMatch = deleteMatch;
-window.deleteAnnouncement = deleteAnnouncement;
+app.post(
+    "/api/register",
+    async (req, res) => {
+        try {
+            const name =
+                cleanString(req.body.name, 120);
+
+            const email =
+                normalizeEmail(req.body.email);
+
+            const password =
+                req.body.password;
+
+            if (!name) {
+                return res.status(400).json({
+                    error:
+                        "Informe seu nome."
+                });
+            }
+
+            if (!isValidEmail(email)) {
+                return res.status(400).json({
+                    error:
+                        "Informe um e-mail válido."
+                });
+            }
+
+            if (
+                !isStrongEnoughPassword(password)
+            ) {
+                return res.status(400).json({
+                    error:
+                        "A senha deve ter pelo menos 8 caracteres."
+                });
+            }
+
+            const existing = get(
+                `
+                    SELECT id
+                    FROM users
+                    WHERE email = ?
+                `,
+                [email]
+            );
+
+            if (existing) {
+                return res.status(409).json({
+                    error:
+                        "Este e-mail já está cadastrado."
+                });
+            }
+
+            const passwordHash =
+                await bcrypt.hash(
+                    password,
+                    12
+                );
+
+            run(
+                `
+                    INSERT INTO users
+                    (name, email, password_hash, role)
+                    VALUES (?, ?, ?, 'member')
+                `,
+                [
+                    name,
+                    email,
+                    passwordHash
+                ]
+            );
+
+            saveDatabase();
+
+            res.status(201).json({
+                message:
+                    "Conta criada com sucesso."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível criar a conta."
+            });
+        }
+    }
+);
+
+// ======================================================
+// LOGOUT
+// ======================================================
+
+app.post(
+    "/api/logout",
+    requireAuth,
+    (req, res) => {
+        const token =
+            req.cookies?.beicola_session;
+
+        if (token) {
+            run(
+                `
+                    DELETE FROM sessions
+                    WHERE token_hash = ?
+                `,
+                [hashToken(token)]
+            );
+
+            saveDatabase();
+        }
+
+        res.clearCookie(
+            "beicola_session",
+            {
+                httpOnly: true,
+                secure:
+                    NODE_ENV === "production",
+                sameSite: "lax",
+                path: "/"
+            }
+        );
+
+        res.json({
+            message: "Logout realizado."
+        });
+    }
+);
+
+// ======================================================
+// RECUPERAÇÃO DE SENHA
+// ======================================================
+
+app.post(
+    "/api/forgot-password",
+    passwordLimiter,
+    async (req, res) => {
+        const email =
+            normalizeEmail(req.body.email);
+
+        const genericMessage =
+            "Se esse e-mail estiver cadastrado, enviaremos as instruções para redefinir a senha.";
+
+        try {
+            if (!isValidEmail(email)) {
+                return res.json({
+                    message: genericMessage
+                });
+            }
+
+            const user = get(
+                `
+                    SELECT *
+                    FROM users
+                    WHERE email = ?
+                `,
+                [email]
+            );
+
+            if (!user) {
+                return res.json({
+                    message: genericMessage
+                });
+            }
+
+            run(
+                `
+                    UPDATE password_resets
+                    SET used = 1
+                    WHERE user_id = ?
+                `,
+                [user.id]
+            );
+
+            const token =
+                generateToken();
+
+            const tokenHash =
+                hashToken(token);
+
+            const expiresAt =
+                new Date(
+                    Date.now() +
+                    30 * 60 * 1000
+                ).toISOString();
+
+            run(
+                `
+                    INSERT INTO password_resets
+                    (user_id, token_hash, expires_at)
+                    VALUES (?, ?, ?)
+                `,
+                [
+                    user.id,
+                    tokenHash,
+                    expiresAt
+                ]
+            );
+
+            saveDatabase();
+
+            const frontendUrl =
+                process.env.FRONTEND_URL ||
+                `http://localhost:${PORT}`;
+
+            const resetUrl =
+                `${frontendUrl}/?reset_token=${encodeURIComponent(token)}`;
+
+            await sendPasswordResetEmail(
+                user.email,
+                resetUrl
+            );
+
+            res.json({
+                message: genericMessage
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.json({
+                message: genericMessage
+            });
+        }
+    }
+);
+
+// ======================================================
+// REDEFINIR SENHA
+// ======================================================
+
+app.post(
+    "/api/reset-password",
+    passwordLimiter,
+    async (req, res) => {
+        try {
+            const token =
+                cleanString(
+                    req.body.token,
+                    500
+                );
+
+            const password =
+                req.body.password;
+
+            if (!token) {
+                return res.status(400).json({
+                    error:
+                        "Token inválido."
+                });
+            }
+
+            if (
+                !isStrongEnoughPassword(password)
+            ) {
+                return res.status(400).json({
+                    error:
+                        "A senha deve ter pelo menos 8 caracteres."
+                });
+            }
+
+            const reset = get(
+                `
+                    SELECT *
+                    FROM password_resets
+                    WHERE token_hash = ?
+                    AND used = 0
+                `,
+                [hashToken(token)]
+            );
+
+            if (!reset) {
+                return res.status(400).json({
+                    error:
+                        "Link inválido ou expirado."
+                });
+            }
+
+            if (
+                new Date(reset.expires_at) <=
+                new Date()
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Link expirado."
+                });
+            }
+
+            const passwordHash =
+                await bcrypt.hash(
+                    password,
+                    12
+                );
+
+            run(
+                `
+                    UPDATE users
+                    SET password_hash = ?
+                    WHERE id = ?
+                `,
+                [
+                    passwordHash,
+                    reset.user_id
+                ]
+            );
+
+            run(
+                `
+                    UPDATE password_resets
+                    SET used = 1
+                    WHERE id = ?
+                `,
+                [reset.id]
+            );
+
+            run(
+                `
+                    DELETE FROM sessions
+                    WHERE user_id = ?
+                `,
+                [reset.user_id]
+            );
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Senha redefinida com sucesso."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível redefinir a senha."
+            });
+        }
+    }
+);
+
+// ======================================================
+// ALTERAR SENHA
+// ======================================================
+
+app.post(
+    "/api/change-password",
+    requireAuth,
+    passwordLimiter,
+    async (req, res) => {
+        try {
+            const currentPassword =
+                req.body.currentPassword;
+
+            const newPassword =
+                req.body.newPassword;
+
+            if (
+                !isStrongEnoughPassword(
+                    newPassword
+                )
+            ) {
+                return res.status(400).json({
+                    error:
+                        "A nova senha deve ter pelo menos 8 caracteres."
+                });
+            }
+
+            const valid =
+                await bcrypt.compare(
+                    currentPassword,
+                    req.user.password_hash
+                );
+
+            if (!valid) {
+                return res.status(400).json({
+                    error:
+                        "A senha atual está incorreta."
+                });
+            }
+
+            const passwordHash =
+                await bcrypt.hash(
+                    newPassword,
+                    12
+                );
+
+            run(
+                `
+                    UPDATE users
+                    SET password_hash = ?
+                    WHERE id = ?
+                `,
+                [
+                    passwordHash,
+                    req.user.id
+                ]
+            );
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Senha alterada com sucesso."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível alterar a senha."
+            });
+        }
+    }
+);
+
+// ======================================================
+// PERFIL
+// ======================================================
+
+app.get(
+    "/api/profile",
+    requireAuth,
+    (req, res) => {
+        res.json({
+            user: publicUser(req.user)
+        });
+    }
+);
+
+app.put(
+    "/api/profile",
+    requireAuth,
+    (req, res) => {
+        try {
+            const name =
+                cleanString(
+                    req.body.name,
+                    120
+                );
+
+            if (!name) {
+                return res.status(400).json({
+                    error:
+                        "Informe um nome."
+                });
+            }
+
+            run(
+                `
+                    UPDATE users
+                    SET name = ?
+                    WHERE id = ?
+                `,
+                [
+                    name,
+                    req.user.id
+                ]
+            );
+
+            saveDatabase();
+
+            const updated =
+                get(
+                    `
+                        SELECT *
+                        FROM users
+                        WHERE id = ?
+                    `,
+                    [req.user.id]
+                );
+
+            res.json({
+                user: publicUser(updated)
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível atualizar o perfil."
+            });
+        }
+    }
+);
+
+// ======================================================
+// MEMBROS
+// ======================================================
+
+app.get(
+    "/api/members",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        const members = all(`
+            SELECT
+                id,
+                name,
+                email,
+                role,
+                created_at
+            FROM users
+            ORDER BY name COLLATE NOCASE
+        `);
+
+        res.json(members);
+    }
+);
+
+// ======================================================
+// JOGADORES
+// ======================================================
+
+app.get(
+    "/api/players",
+    requireAuth,
+    (req, res) => {
+        const players = all(`
+            SELECT
+                players.*,
+                users.name AS linked_user_name,
+                users.email AS linked_user_email
+            FROM players
+            LEFT JOIN users
+                ON users.id = players.user_id
+            ORDER BY
+                players.number IS NULL,
+                players.number,
+                players.name COLLATE NOCASE
+        `);
+
+        res.json(
+            players.map(publicPlayer)
+        );
+    }
+);
+
+app.post(
+    "/api/players",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const name =
+                cleanString(
+                    req.body.name,
+                    120
+                );
+
+            const primaryPosition =
+                cleanString(
+                    req.body.primary_position,
+                    100
+                );
+
+            const secondaryPositions =
+                normalizeSecondaryPositions(
+                    req.body.secondary_positions
+                );
+
+            const status =
+                cleanString(
+                    req.body.status ||
+                    "disponivel",
+                    50
+                );
+
+            const instructions =
+                cleanString(
+                    req.body.instructions,
+                    2000
+                );
+
+            const number =
+                req.body.number === null ||
+                req.body.number === "" ||
+                req.body.number === undefined
+                    ? null
+                    : Number(req.body.number);
+
+            if (!name) {
+                return res.status(400).json({
+                    error:
+                        "Informe o nome do jogador."
+                });
+            }
+
+            if (!primaryPosition) {
+                return res.status(400).json({
+                    error:
+                        "Informe a posição principal."
+                });
+            }
+
+            if (
+                number !== null &&
+                (
+                    !Number.isInteger(number) ||
+                    number < 0 ||
+                    number > 999
+                )
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Número de camisa inválido."
+                });
+            }
+
+            if (number !== null) {
+                const existingNumber =
+                    get(
+                        `
+                            SELECT id
+                            FROM players
+                            WHERE number = ?
+                        `,
+                        [number]
+                    );
+
+                if (existingNumber) {
+                    return res.status(409).json({
+                        error:
+                            "Esse número de camisa já está sendo usado."
+                    });
+                }
+            }
+
+            run(
+                `
+                    INSERT INTO players
+                    (
+                        name,
+                        number,
+                        primary_position,
+                        secondary_positions,
+                        status,
+                        instructions
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                `,
+                [
+                    name,
+                    number,
+                    primaryPosition,
+                    secondaryPositions,
+                    status,
+                    instructions
+                ]
+            );
+
+            saveDatabase();
+
+            const player =
+                get(
+                    `
+                        SELECT *
+                        FROM players
+                        WHERE id = last_insert_rowid()
+                    `
+                );
+
+            res.status(201).json({
+                player:
+                    publicPlayer(player)
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível criar o jogador."
+            });
+        }
+    }
+);
+
+app.put(
+    "/api/players/:id",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const id =
+                Number(req.params.id);
+
+            const existing =
+                get(
+                    `
+                        SELECT *
+                        FROM players
+                        WHERE id = ?
+                    `,
+                    [id]
+                );
+
+            if (!existing) {
+                return res.status(404).json({
+                    error:
+                        "Jogador não encontrado."
+                });
+            }
+
+            const name =
+                cleanString(
+                    req.body.name ??
+                    existing.name,
+                    120
+                );
+
+            const primaryPosition =
+                cleanString(
+                    req.body.primary_position ??
+                    existing.primary_position,
+                    100
+                );
+
+            const secondaryPositions =
+                req.body.secondary_positions ===
+                undefined
+                    ? existing.secondary_positions
+                    : normalizeSecondaryPositions(
+                        req.body.secondary_positions
+                    );
+
+            const status =
+                cleanString(
+                    req.body.status ??
+                    existing.status,
+                    50
+                );
+
+            const instructions =
+                cleanString(
+                    req.body.instructions ??
+                    existing.instructions,
+                    2000
+                );
+
+            let number;
+
+            if (
+                req.body.number === null ||
+                req.body.number === ""
+            ) {
+                number = null;
+            } else if (
+                req.body.number === undefined
+            ) {
+                number = existing.number;
+            } else {
+                number =
+                    Number(req.body.number);
+            }
+
+            if (
+                number !== null &&
+                (
+                    !Number.isInteger(number) ||
+                    number < 0 ||
+                    number > 999
+                )
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Número de camisa inválido."
+                });
+            }
+
+            if (number !== null) {
+                const duplicate =
+                    get(
+                        `
+                            SELECT id
+                            FROM players
+                            WHERE number = ?
+                            AND id != ?
+                        `,
+                        [
+                            number,
+                            id
+                        ]
+                    );
+
+                if (duplicate) {
+                    return res.status(409).json({
+                        error:
+                            "Esse número de camisa já está sendo usado."
+                    });
+                }
+            }
+
+            run(
+                `
+                    UPDATE players
+                    SET
+                        name = ?,
+                        number = ?,
+                        primary_position = ?,
+                        secondary_positions = ?,
+                        status = ?,
+                        instructions = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                `,
+                [
+                    name,
+                    number,
+                    primaryPosition,
+                    secondaryPositions,
+                    status,
+                    instructions,
+                    id
+                ]
+            );
+
+            saveDatabase();
+
+            const player =
+                get(
+                    `
+                        SELECT *
+                        FROM players
+                        WHERE id = ?
+                    `,
+                    [id]
+                );
+
+            res.json({
+                player:
+                    publicPlayer(player)
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível atualizar o jogador."
+            });
+        }
+    }
+);
+
+app.delete(
+    "/api/players/:id",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const id =
+                Number(req.params.id);
+
+            const player =
+                get(
+                    `
+                        SELECT id
+                        FROM players
+                        WHERE id = ?
+                    `,
+                    [id]
+                );
+
+            if (!player) {
+                return res.status(404).json({
+                    error:
+                        "Jogador não encontrado."
+                });
+            }
+
+            run(
+                `
+                    DELETE FROM players
+                    WHERE id = ?
+                `,
+                [id]
+            );
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Jogador excluído."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível excluir o jogador."
+            });
+        }
+    }
+);
+
+// ======================================================
+// CONVERTER MEMBRO EM JOGADOR
+// ======================================================
+
+app.post(
+    "/api/players/from-member/:userId",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const userId =
+                Number(req.params.userId);
+
+            const user =
+                get(
+                    `
+                        SELECT *
+                        FROM users
+                        WHERE id = ?
+                    `,
+                    [userId]
+                );
+
+            if (!user) {
+                return res.status(404).json({
+                    error:
+                        "Membro não encontrado."
+                });
+            }
+
+            const existing =
+                get(
+                    `
+                        SELECT *
+                        FROM players
+                        WHERE user_id = ?
+                    `,
+                    [userId]
+                );
+
+            if (existing) {
+                return res.status(409).json({
+                    error:
+                        "Esse membro já é jogador."
+                });
+            }
+
+            const name =
+                cleanString(
+                    req.body.name ||
+                    user.name,
+                    120
+                );
+
+            const primaryPosition =
+                cleanString(
+                    req.body.primary_position ||
+                    "pivo",
+                    100
+                );
+
+            const secondaryPositions =
+                normalizeSecondaryPositions(
+                    req.body.secondary_positions
+                );
+
+            const status =
+                cleanString(
+                    req.body.status ||
+                    "disponivel",
+                    50
+                );
+
+            const instructions =
+                cleanString(
+                    req.body.instructions ||
+                    "",
+                    2000
+                );
+
+            const number =
+                req.body.number === null ||
+                req.body.number === "" ||
+                req.body.number === undefined
+                    ? null
+                    : Number(req.body.number);
+
+            if (
+                number !== null &&
+                !Number.isInteger(number)
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Número de camisa inválido."
+                });
+            }
+
+            if (number !== null) {
+                const duplicate =
+                    get(
+                        `
+                            SELECT id
+                            FROM players
+                            WHERE number = ?
+                        `,
+                        [number]
+                    );
+
+                if (duplicate) {
+                    return res.status(409).json({
+                        error:
+                            "Esse número de camisa já está sendo usado."
+                    });
+                }
+            }
+
+            run(
+                `
+                    INSERT INTO players
+                    (
+                        user_id,
+                        name,
+                        number,
+                        primary_position,
+                        secondary_positions,
+                        status,
+                        instructions
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                `,
+                [
+                    userId,
+                    name,
+                    number,
+                    primaryPosition,
+                    secondaryPositions,
+                    status,
+                    instructions
+                ]
+            );
+
+            saveDatabase();
+
+            const player =
+                get(
+                    `
+                        SELECT *
+                        FROM players
+                        WHERE id = last_insert_rowid()
+                    `
+                );
+
+            res.status(201).json({
+                player:
+                    publicPlayer(player)
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível converter o membro em jogador."
+            });
+        }
+    }
+);
+
+// ======================================================
+// CAPITÃO
+// ======================================================
+
+app.put(
+    "/api/players/:id/captain",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const id =
+                Number(req.params.id);
+
+            const player =
+                get(
+                    `
+                        SELECT *
+                        FROM players
+                        WHERE id = ?
+                    `,
+                    [id]
+                );
+
+            if (!player) {
+                return res.status(404).json({
+                    error:
+                        "Jogador não encontrado."
+                });
+            }
+
+            run(
+                `
+                    UPDATE players
+                    SET is_captain = 0
+                `
+            );
+
+            run(
+                `
+                    UPDATE players
+                    SET
+                        is_captain = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                `,
+                [id]
+            );
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Capitão definido."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível definir o capitão."
+            });
+        }
+    }
+);
+
+app.delete(
+    "/api/players/captain",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        run(`
+            UPDATE players
+            SET is_captain = 0
+        `);
+
+        saveDatabase();
+
+        res.json({
+            message:
+                "Capitão removido."
+        });
+    }
+);
+
+// ======================================================
+// FUNÇÕES DE COBRANÇA
+// ======================================================
+
+app.get(
+    "/api/player-roles",
+    requireAuth,
+    (req, res) => {
+        const rows = all(`
+            SELECT
+                player_roles.id,
+                player_roles.player_id,
+                player_roles.role,
+                player_roles.priority,
+                players.name AS player_name
+            FROM player_roles
+            JOIN players
+                ON players.id =
+                    player_roles.player_id
+            ORDER BY
+                player_roles.role,
+                player_roles.priority
+        `);
+
+        res.json({
+            penalty:
+                rows.filter(
+                    row => row.role === "penalty"
+                ),
+
+            free_kick:
+                rows.filter(
+                    row => row.role === "free_kick"
+                )
+        });
+    }
+);
+
+app.put(
+    "/api/player-roles/:role",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        const role =
+            req.params.role;
+
+        if (
+            role !== "penalty" &&
+            role !== "free_kick"
+        ) {
+            return res.status(400).json({
+                error:
+                    "Função inválida."
+            });
+        }
+
+        const players =
+            Array.isArray(req.body.players)
+                ? req.body.players
+                : [];
+
+        const uniquePlayers = [
+            ...new Set(
+                players
+                    .map(Number)
+                    .filter(
+                        Number.isInteger
+                    )
+            )
+        ];
+
+        run(
+            `
+                DELETE FROM player_roles
+                WHERE role = ?
+            `,
+            [role]
+        );
+
+        uniquePlayers.forEach(
+            (playerId, index) => {
+                const player =
+                    get(
+                        `
+                            SELECT id
+                            FROM players
+                            WHERE id = ?
+                        `,
+                        [playerId]
+                    );
+
+                if (!player) {
+                    return;
+                }
+
+                run(
+                    `
+                        INSERT INTO player_roles
+                        (player_id, role, priority)
+                        VALUES (?, ?, ?)
+                    `,
+                    [
+                        playerId,
+                        role,
+                        index + 1
+                    ]
+                );
+            }
+        );
+
+        saveDatabase();
+
+        res.json({
+            message:
+                "Função salva."
+        });
+    }
+);
+
+// ======================================================
+// ESCALAÇÃO PRINCIPAL
+// ======================================================
+
+app.get(
+    "/api/lineup",
+    requireAuth,
+    (req, res) => {
+        const lineup = all(`
+            SELECT *
+            FROM lineup
+            ORDER BY
+                CASE position
+                    WHEN 'goleiro' THEN 1
+                    WHEN 'fixo' THEN 2
+                    WHEN 'ala-direita' THEN 3
+                    WHEN 'ala-esquerda' THEN 4
+                    WHEN 'pivo' THEN 5
+                    ELSE 6
+                END
+        `);
+
+        res.json({
+            lineup
+        });
+    }
+);
+
+app.put(
+    "/api/lineup",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const lineup =
+                Array.isArray(req.body.lineup)
+                    ? req.body.lineup
+                    : [];
+
+            const starters =
+                lineup.filter(
+                    item =>
+                        item.status === "titular"
+                );
+
+            if (starters.length > 5) {
+                return res.status(400).json({
+                    error:
+                        "A escalação pode ter no máximo 5 titulares."
+                });
+            }
+
+            const positions = new Set();
+
+            for (const item of starters) {
+                const position =
+                    cleanString(
+                        item.position,
+                        100
+                    );
+
+                if (!position) {
+                    return res.status(400).json({
+                        error:
+                            "Todo titular precisa ter uma posição."
+                    });
+                }
+
+                if (
+                    positions.has(position)
+                ) {
+                    return res.status(400).json({
+                        error:
+                            "Não é possível repetir a mesma posição entre os titulares."
+                    });
+                }
+
+                positions.add(position);
+            }
+
+            run("DELETE FROM lineup");
+
+            lineup.forEach(item => {
+                const playerName =
+                    cleanString(
+                        item.player_name,
+                        120
+                    );
+
+                if (!playerName) {
+                    return;
+                }
+
+                const position =
+                    cleanString(
+                        item.position,
+                        100
+                    );
+
+                const status =
+                    item.status === "titular"
+                        ? "titular"
+                        : "reserva";
+
+                const number =
+                    item.number === null ||
+                    item.number === undefined ||
+                    item.number === ""
+                        ? null
+                        : Number(item.number);
+
+                const notes =
+                    cleanString(
+                        item.notes,
+                        2000
+                    );
+
+                run(
+                    `
+                        INSERT INTO lineup
+                        (
+                            player_name,
+                            position,
+                            status,
+                            number,
+                            notes
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                    `,
+                    [
+                        playerName,
+                        position,
+                        status,
+                        number,
+                        notes
+                    ]
+                );
+            });
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Escalação salva."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível salvar a escalação."
+            });
+        }
+    }
+);
+
+// ======================================================
+// PARTIDAS
+// ======================================================
+
+app.get(
+    "/api/matches",
+    requireAuth,
+    (req, res) => {
+        const matches = all(`
+            SELECT *
+            FROM matches
+            ORDER BY
+                CASE
+                    WHEN match_date IS NULL
+                    THEN 1
+                    ELSE 0
+                END,
+                match_date ASC
+        `);
+
+        res.json(matches);
+    }
+);
+
+app.post(
+    "/api/matches",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const opponent =
+                cleanString(
+                    req.body.opponent,
+                    150
+                );
+
+            const matchDate =
+                req.body.match_date
+                    ? cleanString(
+                        req.body.match_date,
+                        100
+                    )
+                    : null;
+
+            const location =
+                cleanString(
+                    req.body.location,
+                    300
+                );
+
+            const result =
+                cleanString(
+                    req.body.result,
+                    100
+                );
+
+            const notes =
+                cleanString(
+                    req.body.notes,
+                    2000
+                );
+
+            if (!opponent) {
+                return res.status(400).json({
+                    error:
+                        "Informe o adversário."
+                });
+            }
+
+            run(
+                `
+                    INSERT INTO matches
+                    (
+                        opponent,
+                        match_date,
+                        location,
+                        result,
+                        notes
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                `,
+                [
+                    opponent,
+                    matchDate,
+                    location,
+                    result,
+                    notes
+                ]
+            );
+
+            saveDatabase();
+
+            const match =
+                get(
+                    `
+                        SELECT *
+                        FROM matches
+                        WHERE id = last_insert_rowid()
+                    `
+                );
+
+            res.status(201).json({
+                match
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível criar a partida."
+            });
+        }
+    }
+);
+
+app.delete(
+    "/api/matches/:id",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        const id =
+            Number(req.params.id);
+
+        run(
+            `
+                DELETE FROM matches
+                WHERE id = ?
+            `,
+            [id]
+        );
+
+        saveDatabase();
+
+        res.json({
+            message:
+                "Partida excluída."
+        });
+    }
+);
+
+// ======================================================
+// ESCALAÇÃO POR PARTIDA
+// ======================================================
+
+app.get(
+    "/api/matches/:matchId/lineup",
+    requireAuth,
+    (req, res) => {
+        const matchId =
+            Number(req.params.matchId);
+
+        const lineup = all(
+            `
+                SELECT
+                    match_lineup.*,
+                    players.name AS player_name,
+                    players.number
+                FROM match_lineup
+                JOIN players
+                    ON players.id =
+                        match_lineup.player_id
+                WHERE match_lineup.match_id = ?
+                ORDER BY
+                    match_lineup.starter DESC,
+                    match_lineup.id
+            `,
+            [matchId]
+        );
+
+        res.json({
+            lineup
+        });
+    }
+);
+
+app.put(
+    "/api/matches/:matchId/lineup",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const matchId =
+                Number(req.params.matchId);
+
+            const match =
+                get(
+                    `
+                        SELECT id
+                        FROM matches
+                        WHERE id = ?
+                    `,
+                    [matchId]
+                );
+
+            if (!match) {
+                return res.status(404).json({
+                    error:
+                        "Partida não encontrada."
+                });
+            }
+
+            const lineup =
+                Array.isArray(req.body.lineup)
+                    ? req.body.lineup
+                    : [];
+
+            const starters =
+                lineup.filter(
+                    item =>
+                        Number(item.starter) === 1
+                );
+
+            if (starters.length > 5) {
+                return res.status(400).json({
+                    error:
+                        "Uma partida pode ter no máximo 5 titulares."
+                });
+            }
+
+            const playerIds =
+                new Set();
+
+            for (const item of lineup) {
+                const playerId =
+                    Number(item.player_id);
+
+                if (
+                    !Number.isInteger(playerId)
+                ) {
+                    return res.status(400).json({
+                        error:
+                            "Jogador inválido."
+                    });
+                }
+
+                if (
+                    playerIds.has(playerId)
+                ) {
+                    return res.status(400).json({
+                        error:
+                            "Um jogador não pode aparecer duas vezes na escalação."
+                    });
+                }
+
+                playerIds.add(playerId);
+
+                const player =
+                    get(
+                        `
+                            SELECT id
+                            FROM players
+                            WHERE id = ?
+                        `,
+                        [playerId]
+                    );
+
+                if (!player) {
+                    return res.status(400).json({
+                        error:
+                            "Um dos jogadores não existe."
+                    });
+                }
+            }
+
+            // Só apaga depois de validar tudo.
+            run(
+                `
+                    DELETE FROM match_lineup
+                    WHERE match_id = ?
+                `,
+                [matchId]
+            );
+
+            lineup.forEach(item => {
+                run(
+                    `
+                        INSERT INTO match_lineup
+                        (
+                            match_id,
+                            player_id,
+                            position,
+                            starter,
+                            instructions
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                    `,
+                    [
+                        matchId,
+                        Number(item.player_id),
+                        cleanString(
+                            item.position,
+                            100
+                        ),
+                        Number(item.starter) === 1
+                            ? 1
+                            : 0,
+                        cleanString(
+                            item.instructions,
+                            2000
+                        )
+                    ]
+                );
+            });
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Escalação da partida salva."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível salvar a escalação da partida."
+            });
+        }
+    }
+);
+
+// ======================================================
+// ENQUETES
+// ======================================================
+
+app.get(
+    "/api/polls",
+    requireAuth,
+    (req, res) => {
+        const polls = all(`
+            SELECT *
+            FROM polls
+            ORDER BY created_at DESC
+        `);
+
+        const result = polls.map(poll => {
+            const options = all(
+                `
+                    SELECT
+                        poll_options.id,
+                        poll_options.text,
+                        COUNT(
+                            poll_votes.id
+                        ) AS votes
+                    FROM poll_options
+                    LEFT JOIN poll_votes
+                        ON poll_votes.option_id =
+                            poll_options.id
+                    WHERE poll_options.poll_id = ?
+                    GROUP BY
+                        poll_options.id,
+                        poll_options.text
+                    ORDER BY poll_options.id
+                `,
+                [poll.id]
+            );
+
+            const userVotes = all(
+                `
+                    SELECT option_id
+                    FROM poll_votes
+                    WHERE poll_id = ?
+                    AND user_id = ?
+                `,
+                [
+                    poll.id,
+                    req.user.id
+                ]
+            );
+
+            const votedIds =
+                new Set(
+                    userVotes.map(
+                        vote =>
+                            Number(
+                                vote.option_id
+                            )
+                    )
+                );
+
+            const hasVoted =
+                userVotes.length > 0;
+
+            const closed =
+                poll.closes_at &&
+                new Date(poll.closes_at) <=
+                    new Date();
+
+            return {
+                ...poll,
+
+                multiple_choice:
+                    Number(
+                        poll.multiple_choice
+                    ) === 1,
+
+                closed:
+                    Boolean(closed),
+
+                has_voted:
+                    hasVoted,
+
+                options:
+                    options.map(option => ({
+                        ...option,
+
+                        votes:
+                            Number(
+                                option.votes
+                            ),
+
+                        voted:
+                            votedIds.has(
+                                Number(
+                                    option.id
+                                )
+                            )
+                    }))
+            };
+        });
+
+        res.json(result);
+    }
+);
+
+app.post(
+    "/api/polls",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const question =
+                cleanString(
+                    req.body.question,
+                    1000
+                );
+
+            const options =
+                Array.isArray(
+                    req.body.options
+                )
+                    ? req.body.options
+                        .map(
+                            option =>
+                                cleanString(
+                                    option,
+                                    500
+                                )
+                        )
+                        .filter(Boolean)
+                    : [];
+
+            const closesAt =
+                req.body.closes_at
+                    ? cleanString(
+                        req.body.closes_at,
+                        100
+                    )
+                    : null;
+
+            const multipleChoice =
+                req.body.multiple_choice
+                    ? 1
+                    : 0;
+
+            if (!question) {
+                return res.status(400).json({
+                    error:
+                        "Informe a pergunta."
+                });
+            }
+
+            if (options.length < 2) {
+                return res.status(400).json({
+                    error:
+                        "A enquete precisa de pelo menos 2 opções."
+                });
+            }
+
+            run(
+                `
+                    INSERT INTO polls
+                    (
+                        question,
+                        closes_at,
+                        multiple_choice,
+                        created_by
+                    )
+                    VALUES (?, ?, ?, ?)
+                `,
+                [
+                    question,
+                    closesAt,
+                    multipleChoice,
+                    req.user.id
+                ]
+            );
+
+            const poll =
+                get(
+                    `
+                        SELECT *
+                        FROM polls
+                        WHERE id = last_insert_rowid()
+                    `
+                );
+
+            options.forEach(option => {
+                run(
+                    `
+                        INSERT INTO poll_options
+                        (poll_id, text)
+                        VALUES (?, ?)
+                    `,
+                    [
+                        poll.id,
+                        option
+                    ]
+                );
+            });
+
+            saveDatabase();
+
+            res.status(201).json({
+                poll
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível criar a enquete."
+            });
+        }
+    }
+);
+
+app.post(
+    "/api/polls/:id/vote",
+    requireAuth,
+    (req, res) => {
+        try {
+            const pollId =
+                Number(req.params.id);
+
+            const poll =
+                get(
+                    `
+                        SELECT *
+                        FROM polls
+                        WHERE id = ?
+                    `,
+                    [pollId]
+                );
+
+            if (!poll) {
+                return res.status(404).json({
+                    error:
+                        "Enquete não encontrada."
+                });
+            }
+
+            if (
+                poll.closes_at &&
+                new Date(poll.closes_at) <=
+                    new Date()
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Esta enquete já foi encerrada."
+                });
+            }
+
+            const optionIds =
+                Array.isArray(
+                    req.body.option_ids
+                )
+                    ? [
+                        ...new Set(
+                            req.body.option_ids
+                                .map(Number)
+                                .filter(
+                                    Number.isInteger
+                                )
+                        )
+                    ]
+                    : [];
+
+            if (!optionIds.length) {
+                return res.status(400).json({
+                    error:
+                        "Escolha pelo menos uma opção."
+                });
+            }
+
+            if (
+                Number(poll.multiple_choice) !== 1 &&
+                optionIds.length > 1
+            ) {
+                return res.status(400).json({
+                    error:
+                        "Esta enquete permite apenas uma opção."
+                });
+            }
+
+            const existingVote =
+                get(
+                    `
+                        SELECT id
+                        FROM poll_votes
+                        WHERE poll_id = ?
+                        AND user_id = ?
+                        LIMIT 1
+                    `,
+                    [
+                        pollId,
+                        req.user.id
+                    ]
+                );
+
+            if (existingVote) {
+                return res.status(409).json({
+                    error:
+                        "Você já votou nesta enquete."
+                });
+            }
+
+            for (const optionId of optionIds) {
+                const option =
+                    get(
+                        `
+                            SELECT id
+                            FROM poll_options
+                            WHERE id = ?
+                            AND poll_id = ?
+                        `,
+                        [
+                            optionId,
+                            pollId
+                        ]
+                    );
+
+                if (!option) {
+                    return res.status(400).json({
+                        error:
+                            "Uma das opções é inválida."
+                    });
+                }
+            }
+
+            optionIds.forEach(optionId => {
+                run(
+                    `
+                        INSERT INTO poll_votes
+                        (
+                            poll_id,
+                            option_id,
+                            user_id
+                        )
+                        VALUES (?, ?, ?)
+                    `,
+                    [
+                        pollId,
+                        optionId,
+                        req.user.id
+                    ]
+                );
+            });
+
+            saveDatabase();
+
+            res.json({
+                message:
+                    "Voto registrado."
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível registrar o voto."
+            });
+        }
+    }
+);
+
+app.delete(
+    "/api/polls/:id",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        const id =
+            Number(req.params.id);
+
+        run(
+            `
+                DELETE FROM polls
+                WHERE id = ?
+            `,
+            [id]
+        );
+
+        saveDatabase();
+
+        res.json({
+            message:
+                "Enquete excluída."
+        });
+    }
+);
+
+// ======================================================
+// AVISOS
+// ======================================================
+
+app.get(
+    "/api/announcements",
+    requireAuth,
+    (req, res) => {
+        const announcements = all(`
+            SELECT
+                announcements.*,
+                users.name AS author_name
+            FROM announcements
+            LEFT JOIN users
+                ON users.id =
+                    announcements.created_by
+            ORDER BY
+                announcements.created_at DESC
+        `);
+
+        res.json(announcements);
+    }
+);
+
+app.post(
+    "/api/announcements",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        try {
+            const title =
+                cleanString(
+                    req.body.title,
+                    300
+                );
+
+            const content =
+                cleanString(
+                    req.body.content,
+                    10000
+                );
+
+            if (!title) {
+                return res.status(400).json({
+                    error:
+                        "Informe o título."
+                });
+            }
+
+            if (!content) {
+                return res.status(400).json({
+                    error:
+                        "Informe o conteúdo."
+                });
+            }
+
+            run(
+                `
+                    INSERT INTO announcements
+                    (
+                        title,
+                        content,
+                        created_by
+                    )
+                    VALUES (?, ?, ?)
+                `,
+                [
+                    title,
+                    content,
+                    req.user.id
+                ]
+            );
+
+            saveDatabase();
+
+            const announcement =
+                get(
+                    `
+                        SELECT *
+                        FROM announcements
+                        WHERE id = last_insert_rowid()
+                    `
+                );
+
+            res.status(201).json({
+                announcement
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível publicar o aviso."
+            });
+        }
+    }
+);
+
+app.delete(
+    "/api/announcements/:id",
+    requireAuth,
+    requireAdmin,
+    (req, res) => {
+        const id =
+            Number(req.params.id);
+
+        run(
+            `
+                DELETE FROM announcements
+                WHERE id = ?
+            `,
+            [id]
+        );
+
+        saveDatabase();
+
+        res.json({
+            message:
+                "Aviso excluído."
+        });
+    }
+);
+
+// ======================================================
+// CONFIGURAÇÃO DO PRIMEIRO ADMIN
+// ======================================================
+
+app.get(
+    "/api/setup-admin/status",
+    (req, res) => {
+        const admin =
+            get(
+                `
+                    SELECT id
+                    FROM users
+                    WHERE role = 'admin'
+                    LIMIT 1
+                `
+            );
+
+        res.json({
+            available:
+                !admin &&
+                Boolean(
+                    process.env.ADMIN_SETUP_KEY
+                )
+        });
+    }
+);
+
+app.post(
+    "/api/setup-admin",
+    passwordLimiter,
+    async (req, res) => {
+        try {
+            const existingAdmin =
+                get(
+                    `
+                        SELECT id
+                        FROM users
+                        WHERE role = 'admin'
+                        LIMIT 1
+                    `
+                );
+
+            if (existingAdmin) {
+                return res.status(409).json({
+                    error:
+                        "Já existe um administrador."
+                });
+            }
+
+            if (
+                !setupAdminKeyValid(
+                    req.body.key
+                )
+            ) {
+                return res.status(403).json({
+                    error:
+                        "Chave de configuração inválida."
+                });
+            }
+
+            const name =
+                cleanString(
+                    req.body.name,
+                    120
+                );
+
+            const email =
+                normalizeEmail(
+                    req.body.email
+                );
+
+            const password =
+                req.body.password;
+
+            if (!name) {
+                return res.status(400).json({
+                    error:
+                        "Informe o nome."
+                });
+            }
+
+            if (!isValidEmail(email)) {
+                return res.status(400).json({
+                    error:
+                        "Informe um e-mail válido."
+                });
+            }
+
+            if (
+                !isStrongEnoughPassword(
+                    password
+                )
+            ) {
+                return res.status(400).json({
+                    error:
+                        "A senha deve ter pelo menos 8 caracteres."
+                });
+            }
+
+            const existingUser =
+                get(
+                    `
+                        SELECT id
+                        FROM users
+                        WHERE email = ?
+                    `,
+                    [email]
+                );
+
+            if (existingUser) {
+                return res.status(409).json({
+                    error:
+                        "Esse e-mail já está cadastrado."
+                });
+            }
+
+            const passwordHash =
+                await bcrypt.hash(
+                    password,
+                    12
+                );
+
+            run(
+                `
+                    INSERT INTO users
+                    (
+                        name,
+                        email,
+                        password_hash,
+                        role
+                    )
+                    VALUES (?, ?, ?, 'admin')
+                `,
+                [
+                    name,
+                    email,
+                    passwordHash
+                ]
+            );
+
+            saveDatabase();
+
+            const user =
+                get(
+                    `
+                        SELECT *
+                        FROM users
+                        WHERE id = last_insert_rowid()
+                    `
+                );
+
+            const token =
+                createSession(user.id);
+
+            res.cookie(
+                "beicola_session",
+                token,
+                sessionCookieOptions()
+            );
+
+            res.status(201).json({
+                message:
+                    "Administrador criado.",
+                user:
+                    publicUser(user)
+            });
+        } catch (error) {
+            console.error(error);
+
+            res.status(500).json({
+                error:
+                    "Não foi possível criar o administrador."
+            });
+        }
+    }
+);
+
+// ======================================================
+// LIMPEZA DE SESSÕES
+// ======================================================
+
+function cleanupExpiredSessions() {
+    try {
+        run(
+            `
+                DELETE FROM sessions
+                WHERE expires_at <= ?
+            `,
+            [new Date().toISOString()]
+        );
+
+        run(
+            `
+                DELETE FROM password_resets
+                WHERE expires_at <= ?
+                OR used = 1
+            `,
+            [new Date().toISOString()]
+        );
+
+        saveDatabase();
+    } catch (error) {
+        console.error(
+            "Erro na limpeza:",
+            error
+        );
+    }
+}
+
+// ======================================================
+// FRONTEND
+// ======================================================
+
+app.use(
+    express.static(FRONTEND_DIR, {
+        extensions: ["html"]
+    })
+);
+
+app.use((req, res, next) => {
+    if (req.path.startsWith("/api/")) {
+        return next();
+    }
+
+    res.sendFile(
+        path.join(
+            FRONTEND_DIR,
+            "index.html"
+        )
+    );
+});
+
+// ======================================================
+// ERRO 404 DA API
+// ======================================================
+
+app.use(
+    "/api",
+    (req, res) => {
+        res.status(404).json({
+            error:
+                "Rota da API não encontrada."
+        });
+    }
+);
+
+// ======================================================
+// ERROS
+// ======================================================
+
+app.use(
+    (error, req, res, next) => {
+        console.error(error);
+
+        if (res.headersSent) {
+            return next(error);
+        }
+
+        res.status(500).json({
+            error:
+                "Erro interno do servidor."
+        });
+    }
+);
+
+// ======================================================
+// INICIALIZAÇÃO
+// ======================================================
+
+(async () => {
+    try {
+        const SQL =
+            await initSqlJs({
+                locateFile:
+                    file =>
+                        path.join(
+                            __dirname,
+                            "node_modules",
+                            "sql.js",
+                            "dist",
+                            file
+                        )
+            });
+
+        initializeDatabase(SQL);
+
+        cleanupExpiredSessions();
+
+        setInterval(
+            cleanupExpiredSessions,
+            60 * 60 * 1000
+        );
+
+        app.listen(
+            PORT,
+            "0.0.0.0",
+            () => {
+                console.log(
+                    `Beiçola F.I. rodando na porta ${PORT}`
+                );
+            }
+        );
+    } catch (error) {
+        console.error(
+            "Erro ao iniciar o servidor:",
+            error
+        );
+
+        process.exit(1);
+    }
+})();
