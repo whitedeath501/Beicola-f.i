@@ -1,849 +1,1856 @@
-const $ = selector =>
+/* =========================================================
+   BEIÇOLA F.I. — FRONTEND
+   Sistema pessoal do time
+========================================================= */
+
+const $ = (selector) =>
   document.querySelector(selector);
 
-const api = async (
-  url,
-  options = {}
-) => {
+const $$ = (selector) =>
+  [...document.querySelectorAll(selector)];
 
-  const response = await fetch(
-    url,
-    {
-      ...options,
+let me = null;
+let playersData = [];
+let matchesData = [];
+let editingPlayerId = null;
 
-      headers: {
-        'Content-Type':
-          'application/json',
 
-        ...(options.headers || {})
-      }
-    }
-  );
+/* =========================================================
+   API
+========================================================= */
 
-  let json = {};
+async function api(url, options = {}) {
+
+  const response = await fetch(url, {
+    ...options,
+
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    },
+
+    credentials: "include"
+  });
+
+  let data = {};
 
   try {
-    json = await response.json();
-  } catch {}
+    data = await response.json();
+  } catch {
+    data = {};
+  }
 
   if (!response.ok) {
     throw new Error(
-      json.error || 'Erro'
+      data.error ||
+      data.message ||
+      "Ocorreu um erro."
     );
   }
 
-  return json;
-};
+  return data;
+}
 
-function msg(
-  element,
-  text,
-  ok = false
-) {
+
+/* =========================================================
+   MENSAGENS
+========================================================= */
+
+function showMessage(element, text, success = false) {
+
+  if (!element) return;
+
   element.textContent = text;
 
   element.className =
-    ok
-      ? 'ok'
-      : 'err';
-}
-
-let me = null;
-
-
-/* =========================
-   ABAS
-========================= */
-
-for (
-  const button of
-  document.querySelectorAll(
-    '[data-tab]'
-  )
-) {
-
-  button.onclick = () => {
-
-    for (
-      const formName of
-      ['login', 'register', 'forgot']
-    ) {
-
-      $('#' + formName)
-        .classList.toggle(
-          'hidden',
-          button.dataset.tab !==
-          formName
-        );
-    }
-
-  };
-
+    success
+      ? "ok"
+      : "err";
 }
 
 
-/* =========================
+function toast(message, type = "ok") {
+
+  const element = $("#toast");
+
+  if (!element) {
+    alert(message);
+    return;
+  }
+
+  element.textContent = message;
+  element.className = `toast ${type}`;
+
+  setTimeout(() => {
+    element.className = "toast hidden";
+  }, 3000);
+}
+
+
+/* =========================================================
+   ABAS DE AUTENTICAÇÃO
+========================================================= */
+
+function setupAuthTabs() {
+
+  const showRegister = $("#showRegister");
+  const showForgot = $("#showForgot");
+  const backToLogin = $("#backToLogin");
+  const forgotBackLogin = $("#forgotBackLogin");
+
+  showRegister?.addEventListener("click", () => {
+    $("#loginBox")?.classList.add("hidden");
+    $("#registerBox")?.classList.remove("hidden");
+    $("#forgotBox")?.classList.add("hidden");
+  });
+
+  showForgot?.addEventListener("click", () => {
+    $("#loginBox")?.classList.add("hidden");
+    $("#registerBox")?.classList.add("hidden");
+    $("#forgotBox")?.classList.remove("hidden");
+  });
+
+  backToLogin?.addEventListener("click", () => {
+    $("#loginBox")?.classList.remove("hidden");
+    $("#registerBox")?.classList.add("hidden");
+    $("#forgotBox")?.classList.add("hidden");
+  });
+
+  forgotBackLogin?.addEventListener("click", () => {
+    $("#loginBox")?.classList.remove("hidden");
+    $("#registerBox")?.classList.add("hidden");
+    $("#forgotBox")?.classList.add("hidden");
+  });
+}
+
+
+/* =========================================================
    LOGIN
-========================= */
+========================================================= */
 
-$('#login').onsubmit =
-  async event => {
+$("#loginForm")?.addEventListener("submit", async (event) => {
 
-    event.preventDefault();
+  event.preventDefault();
 
-    try {
-
-      const form =
-        new FormData(
-          event.target
-        );
-
-      await api(
-        '/api/login',
-        {
-          method: 'POST',
-
-          body:
-            JSON.stringify(
-              Object.fromEntries(
-                form
-              )
-            )
-        }
-      );
-
-      await load();
-
-    } catch (error) {
-
-      msg(
-        $('#authMsg'),
-        error.message
-      );
-    }
-  };
-
-
-/* =========================
-   CADASTRO
-========================= */
-
-$('#register').onsubmit =
-  async event => {
-
-    event.preventDefault();
-
-    try {
-
-      const form =
-        new FormData(
-          event.target
-        );
-
-      await api(
-        '/api/register',
-        {
-          method: 'POST',
-
-          body:
-            JSON.stringify(
-              Object.fromEntries(
-                form
-              )
-            )
-        }
-      );
-
-      msg(
-        $('#authMsg'),
-        'Conta criada. Agora entre.',
-        true
-      );
-
-      document
-        .querySelector(
-          '[data-tab="login"]'
-        )
-        .click();
-
-    } catch (error) {
-
-      msg(
-        $('#authMsg'),
-        error.message
-      );
-    }
-  };
-
-
-/* =========================
-   ESQUECI A SENHA
-========================= */
-
-$('#forgot').onsubmit =
-  async event => {
-
-    event.preventDefault();
-
-    try {
-
-      const form =
-        new FormData(
-          event.target
-        );
-
-      const result =
-        await api(
-          '/api/forgot-password',
-          {
-            method: 'POST',
-
-            body:
-              JSON.stringify(
-                Object.fromEntries(
-                  form
-                )
-              )
-          }
-        );
-
-      msg(
-        $('#authMsg'),
-        result.message,
-        true
-      );
-
-    } catch (error) {
-
-      msg(
-        $('#authMsg'),
-        error.message
-      );
-    }
-  };
-
-
-/* =========================
-   PRIMEIRO ADMIN
-========================= */
-
-async function checkAdminSetup() {
+  const message = $("#loginMessage");
 
   try {
 
-    const result =
-      await api(
-        '/api/setup-admin/status'
-      );
+    const data = {
+      email: $("#loginEmail").value.trim(),
+      password: $("#loginPassword").value
+    };
 
-    if (
-      result.available
-    ) {
+    await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify(data)
+    });
 
-      $('#setupAdmin')
-        .classList
-        .remove('hidden');
+    showMessage(
+      message,
+      "Login realizado com sucesso.",
+      true
+    );
 
-    } else {
+    await loadApp();
 
-      $('#setupAdmin')
-        .classList
-        .add('hidden');
-    }
+  } catch (error) {
 
-  } catch {
-
-    $('#setupAdmin')
-      .classList
-      .add('hidden');
+    showMessage(
+      message,
+      error.message
+    );
   }
-}
+});
 
 
-$('#setupAdminForm').onsubmit =
-  async event => {
+/* =========================================================
+   CADASTRO
+========================================================= */
 
-    event.preventDefault();
+$("#registerForm")?.addEventListener("submit", async (event) => {
 
-    const form =
-      new FormData(
-        event.target
-      );
+  event.preventDefault();
 
-    try {
+  const message = $("#registerMessage");
 
-      const data =
-        await api(
-          '/api/setup-admin',
-          {
-            method: 'POST',
+  const password =
+    $("#registerPassword").value;
 
-            body:
-              JSON.stringify(
-                Object.fromEntries(
-                  form
-                )
-              )
-          }
-        );
+  const confirmation =
+    $("#registerPasswordConfirm").value;
 
-      msg(
-        $('#setupAdminMsg'),
-        data.message,
-        true
-      );
+  if (password !== confirmation) {
 
-      event.target.reset();
+    showMessage(
+      message,
+      "As senhas não são iguais."
+    );
 
-      setTimeout(
-        () => {
+    return;
+  }
 
-          document
-            .querySelector(
-              '[data-tab="login"]'
-            )
-            .click();
+  try {
 
-        },
-        1500
-      );
+    await api("/api/register", {
+      method: "POST",
 
-      await checkAdminSetup();
+      body: JSON.stringify({
+        name:
+          $("#registerName").value.trim(),
 
-    } catch (error) {
+        email:
+          $("#registerEmail").value.trim(),
 
-      msg(
-        $('#setupAdminMsg'),
-        error.message
-      );
-    }
-  };
+        password
+      })
+    });
+
+    showMessage(
+      message,
+      "Conta criada com sucesso! Agora faça login.",
+      true
+    );
+
+    event.target.reset();
+
+    setTimeout(() => {
+
+      $("#backToLogin")?.click();
+
+    }, 1000);
+
+  } catch (error) {
+
+    showMessage(
+      message,
+      error.message
+    );
+  }
+});
 
 
-/* =========================
+/* =========================================================
+   RECUPERAÇÃO DE SENHA
+========================================================= */
+
+$("#forgotForm")?.addEventListener("submit", async (event) => {
+
+  event.preventDefault();
+
+  const message = $("#forgotMessage");
+
+  try {
+
+    const data = await api(
+      "/api/forgot-password",
+      {
+        method: "POST",
+
+        body: JSON.stringify({
+          email:
+            $("#forgotEmail").value.trim()
+        })
+      }
+    );
+
+    showMessage(
+      message,
+      data.message ||
+      "Se o e-mail existir, enviaremos as instruções.",
+      true
+    );
+
+  } catch (error) {
+
+    showMessage(
+      message,
+      error.message
+    );
+  }
+});
+
+
+/* =========================================================
    LOGOUT
-========================= */
+========================================================= */
 
-$('#logout').onclick =
+$("#logoutButton")?.addEventListener(
+  "click",
   async () => {
 
     try {
 
       await api(
-        '/api/logout',
+        "/api/logout",
         {
-          method: 'POST'
+          method: "POST"
         }
       );
 
-    } finally {
-
-      location.reload();
+    } catch {
+      // Mesmo que a API falhe,
+      // voltamos para a tela inicial.
     }
-  };
+
+    location.reload();
+  }
+);
 
 
-$('#refresh').onclick =
-  load;
+/* =========================================================
+   NAVEGAÇÃO
+========================================================= */
+
+function setupNavigation() {
+
+  $$(".nav-button").forEach(button => {
+
+    button.addEventListener("click", () => {
+
+      const section =
+        button.dataset.section;
+
+      if (!section) return;
+
+      $$(".nav-button").forEach(item => {
+        item.classList.remove("active");
+      });
+
+      button.classList.add("active");
+
+      $$(".app-section").forEach(item => {
+        item.classList.add("hidden");
+      });
+
+      const target =
+        $(`#section-${section}`);
+
+      target?.classList.remove("hidden");
+
+      if (section === "players") {
+        loadPlayers();
+      }
+
+      if (section === "lineup") {
+        loadLineup();
+        loadMatchLineup();
+      }
+
+      if (section === "polls") {
+        loadPolls();
+      }
+
+      if (section === "matches") {
+        loadMatches();
+      }
+
+      if (section === "announcements") {
+        loadAnnouncements();
+      }
+
+      if (section === "admin") {
+        loadMembers();
+      }
+
+    });
+
+  });
+}
 
 
-/* =========================
-   CARREGAR SISTEMA
-========================= */
+/* =========================================================
+   CARREGAR USUÁRIO
+========================================================= */
 
-async function load() {
+async function loadApp() {
 
   try {
 
-    const result =
-      await api('/api/me');
+    const data =
+      await api("/api/me");
 
-    me = result.user;
+    me = data.user;
 
-    $('#auth')
-      .classList
-      .add('hidden');
+    $("#authScreen")?.classList.add("hidden");
 
-    $('#app')
-      .classList
-      .remove('hidden');
+    $("#appScreen")?.classList.remove("hidden");
 
-    $('#logout')
-      .classList
-      .remove('hidden');
-
-    $('#userName')
-      .textContent =
+    $("#headerUserName").textContent =
       me.name;
 
-    $('#userRole')
-      .textContent =
-      me.role === 'admin'
-        ? 'Administrador'
-        : 'Integrante';
+    $("#headerUserRole").textContent =
+      me.role === "admin"
+        ? "Administrador"
+        : "Integrante";
 
-    /*
-      Mostra ferramentas administrativas
-      somente para admins.
-    */
+    if (me.role === "admin") {
 
-    if (
-      me.role === 'admin'
-    ) {
-
-      [
-        'adminPoll',
-        'adminMatch',
-        'adminNotice'
-      ].forEach(
-        elementId => {
-
-          $(
-            '#' + elementId
-          )
-            .classList
-            .remove('hidden');
-
-        }
-      );
+      $$(".admin-only").forEach(element => {
+        element.classList.remove("hidden");
+      });
 
     } else {
 
-      [
-        'adminPoll',
-        'adminMatch',
-        'adminNotice'
-      ].forEach(
-        elementId => {
-
-          $(
-            '#' + elementId
-          )
-            .classList
-            .add('hidden');
-
-        }
-      );
+      $$(".admin-only").forEach(element => {
+        element.classList.add("hidden");
+      });
     }
 
-    await Promise.all([
-      polls(),
-      matches(),
-      lineup(),
-      announcements(),
-      members()
-    ]);
+    await loadDashboard();
 
-    $('#profileForm input')
-      .value =
-      me.name;
+    await loadPlayers();
+
+    await loadMatches();
+
+    await loadPolls();
+
+    await loadAnnouncements();
+
+    await loadMembers();
+
+    await loadRoles();
+
+    await loadLineup();
+
+    await loadMatchLineup();
+
+    loadProfile();
 
   } catch {
 
-    $('#auth')
-      .classList
-      .remove('hidden');
+    $("#authScreen")?.classList.remove("hidden");
 
-    $('#app')
-      .classList
-      .add('hidden');
-
-    $('#logout')
-      .classList
-      .add('hidden');
+    $("#appScreen")?.classList.add("hidden");
 
     await checkAdminSetup();
+
   }
 }
 
 
-/* =========================
-   ENQUETES
-========================= */
+/* =========================================================
+   DASHBOARD
+========================================================= */
 
-async function polls() {
+async function loadDashboard() {
 
-  const result =
-    await api(
-      '/api/polls'
-    );
+  try {
 
-  const pollList =
-    result.polls;
+    const [
+      players,
+      matches,
+      polls,
+      announcements
+    ] = await Promise.all([
+      api("/api/players"),
+      api("/api/matches"),
+      api("/api/polls"),
+      api("/api/announcements")
+    ]);
 
-  $('#polls').innerHTML =
-    pollList.length
+    const playerList =
+      players.players || [];
 
-      ? pollList
-          .map(poll => {
+    const matchList =
+      matches.matches || [];
 
-            return `
-              <div class="item">
+    const pollList =
+      polls.polls || [];
 
-                <b>
-                  ${esc(
-                    poll.question
-                  )}
-                </b>
+    const announcementList =
+      announcements.announcements || [];
 
-                ${poll.options
-                  .map(
-                    (option, index) => `
-                      <label class="choice">
+    $("#welcomeName").textContent =
+      me?.name || "Integrante";
 
-                        <input
-                          type="${
-                            poll.multiple
-                              ? 'checkbox'
-                              : 'radio'
-                          }"
+    $("#dashboardPlayers").textContent =
+      playerList.length;
 
-                          name="poll-${
-                            poll.id
-                          }"
+    $("#dashboardMatches").textContent =
+      matchList.length;
 
-                          value="${index}"
+    $("#dashboardPolls").textContent =
+      pollList.length;
 
-                          ${
-                            poll.hasVoted
-                              ? 'disabled'
-                              : ''
-                          }
-                        >
+    $("#dashboardAnnouncements").textContent =
+      announcementList.length;
 
-                        ${esc(option)}
+    const nextMatch =
+      [...matchList]
+        .filter(match => {
+          return match.date &&
+            new Date(match.date) >= new Date();
+        })
+        .sort((a, b) =>
+          new Date(a.date) -
+          new Date(b.date)
+        )[0];
 
-                      </label>
-                    `
-                  )
-                  .join('')}
+    $("#dashboardNextMatch").textContent =
+      nextMatch
+        ? `vs. ${nextMatch.opponent} — ${formatDate(nextMatch.date)}`
+        : "Nenhuma partida próxima.";
 
-                ${
-                  poll.hasVoted
-                    ? `
-                      <span class="muted">
-                        Você já votou.
-                      </span>
-                    `
-                    : poll.closed
-                    ? `
-                      <span class="muted">
-                        Encerrada.
-                      </span>
-                    `
-                    : `
-                      <button
-                        onclick="vote(
-                          '${poll.id}',
-                          ${poll.multiple}
-                        )"
-                      >
-                        Votar
-                      </button>
-                    `
-                }
-
-                <button
-                  class="ghost"
-                  onclick="results(
-                    '${poll.id}'
-                  )"
-                >
-                  Resultados
-                </button>
-
-                ${
-                  me.role === 'admin' &&
-                  !poll.closed
-                    ? `
-                      <button
-                        class="danger"
-                        onclick="closePoll(
-                          '${poll.id}'
-                        )"
-                      >
-                        Encerrar
-                      </button>
-                    `
-                    : ''
-                }
-
-              </div>
-            `;
-
-          })
-          .join('')
-
-      : `
-        <p class="muted">
-          Nenhuma enquete ainda.
-        </p>
-      `;
+  } catch {
+    // Dashboard não deve impedir o resto do sistema.
+  }
 }
 
 
-window.vote =
-  async (
-    id,
-    multiple
-  ) => {
+/* =========================================================
+   JOGADORES
+========================================================= */
 
-    const choices =
-      [
-        ...document.querySelectorAll(
-          `[name="poll-${id}"]:checked`
-        )
-      ].map(
-        input =>
-          Number(
-            input.value
-          )
-      );
+async function loadPlayers() {
 
-    try {
+  try {
 
-      await api(
-        '/api/polls/' +
-        id +
-        '/vote',
-        {
-          method: 'POST',
+    const data =
+      await api("/api/players");
 
-          body:
-            JSON.stringify({
-              options:
-                choices
-            })
-        }
-      );
+    playersData =
+      data.players || [];
 
-      await polls();
+    renderPlayers();
 
-    } catch (error) {
+    updatePlayerSelects();
 
-      alert(
-        error.message
-      );
-    }
-  };
+    renderCaptain();
+
+  } catch (error) {
+
+    console.error(
+      "Erro ao carregar jogadores:",
+      error
+    );
+  }
+}
 
 
-window.results =
-  async id => {
+function renderPlayers() {
 
-    try {
+  const container =
+    $("#playersList");
 
-      const result =
-        await api(
-          '/api/polls/' +
-          id +
-          '/results'
+  if (!container) return;
+
+  if (!playersData.length) {
+
+    container.innerHTML = `
+      <div class="empty">
+        Nenhum jogador cadastrado.
+      </div>
+    `;
+
+    return;
+  }
+
+  container.innerHTML =
+    playersData.map(player => {
+
+      const secondary =
+        parsePositions(
+          player.secondary_positions
         );
 
-      alert(
-        result.question +
-        '\n\n' +
+      return `
+        <div class="player-card">
 
-        result.results
-          .map(
-            item =>
-              `${item.label}: ${item.count}`
-          )
-          .join('\n') +
+          <div class="player-number">
+            ${player.number ?? "-"}
+          </div>
 
-        '\n\nTotal de votos: ' +
-        result.total
-      );
+          <div class="player-info">
 
-    } catch (error) {
+            <h3>
+              ${esc(player.name)}
+            </h3>
 
-      alert(
-        error.message
-      );
-    }
-  };
+            <div class="muted">
+              ${esc(player.primary_position)}
+              ${
+                secondary.length
+                  ? " • " +
+                    secondary
+                      .map(esc)
+                      .join(", ")
+                  : ""
+              }
+            </div>
+
+            <div class="player-status">
+              ${statusLabel(player.status)}
+
+              ${
+                player.is_captain
+                  ? " • Capitão"
+                  : ""
+              }
+            </div>
+
+            ${
+              player.instructions
+                ? `
+                  <p class="muted">
+                    ${esc(player.instructions)}
+                  </p>
+                `
+                : ""
+            }
+
+          </div>
+
+          ${
+            me?.role === "admin"
+              ? `
+                <div class="player-actions">
+
+                  <button
+                    class="ghost"
+                    onclick="editPlayer(${player.id})"
+                  >
+                    Editar
+                  </button>
+
+                  <button
+                    class="danger"
+                    onclick="deletePlayer(${player.id})"
+                  >
+                    Excluir
+                  </button>
+
+                </div>
+              `
+              : ""
+          }
+
+        </div>
+      `;
+
+    }).join("");
+}
 
 
-window.closePoll =
-  async id => {
+/* =========================================================
+   NOVO JOGADOR
+========================================================= */
 
-    try {
+$("#newPlayerButton")?.addEventListener(
+  "click",
+  () => {
 
-      await api(
-        '/api/polls/' +
-        id +
-        '/close',
-        {
-          method: 'POST'
-        }
-      );
+    editingPlayerId = null;
 
-      await polls();
+    $("#playerModalTitle").textContent =
+      "Novo jogador";
 
-    } catch (error) {
+    $("#playerForm").reset();
 
-      alert(
-        error.message
-      );
-    }
-  };
+    $("#playerId").value = "";
+
+    $("#playerFormMessage").textContent = "";
+
+    $("#playerModal")
+      .classList
+      .remove("hidden");
+
+    loadMemberOptions();
+
+  }
+);
 
 
-$('#pollForm').onsubmit =
+/* =========================================================
+   EDITAR JOGADOR
+========================================================= */
+
+window.editPlayer = async function(id) {
+
+  const player =
+    playersData.find(
+      item => Number(item.id) === Number(id)
+    );
+
+  if (!player) return;
+
+  editingPlayerId = id;
+
+  $("#playerModalTitle").textContent =
+    "Editar jogador";
+
+  $("#playerId").value =
+    player.id;
+
+  $("#playerName").value =
+    player.name || "";
+
+  $("#playerNumber").value =
+    player.number ?? "";
+
+  $("#playerStatus").value =
+    player.status || "disponivel";
+
+  $("#playerPrimaryPosition").value =
+    player.primary_position || "";
+
+  $("#playerSecondaryPositions").value =
+    parsePositions(
+      player.secondary_positions
+    ).join(", ");
+
+  $("#playerInstructions").value =
+    player.instructions || "";
+
+  await loadMemberOptions(
+    player.user_id
+  );
+
+  $("#playerModal")
+    .classList
+    .remove("hidden");
+};
+
+
+/* =========================================================
+   SALVAR JOGADOR
+========================================================= */
+
+$("#playerForm")?.addEventListener(
+  "submit",
   async event => {
 
     event.preventDefault();
 
-    const form =
-      new FormData(
-        event.target
+    const message =
+      $("#playerFormMessage");
+
+    const secondary =
+      $("#playerSecondaryPositions")
+        .value
+        .split(",")
+        .map(item => item.trim())
+        .filter(Boolean);
+
+    const userValue =
+      $("#playerUser").value;
+
+    const data = {
+
+      name:
+        $("#playerName").value.trim(),
+
+      number:
+        $("#playerNumber").value
+          ? Number($("#playerNumber").value)
+          : null,
+
+      status:
+        $("#playerStatus").value,
+
+      primary_position:
+        $("#playerPrimaryPosition").value,
+
+      secondary_positions:
+        secondary,
+
+      instructions:
+        $("#playerInstructions").value.trim(),
+
+      user_id:
+        userValue
+          ? Number(userValue)
+          : null
+    };
+
+    try {
+
+      if (editingPlayerId) {
+
+        await api(
+          `/api/players/${editingPlayerId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(data)
+          }
+        );
+
+      } else {
+
+        await api(
+          "/api/players",
+          {
+            method: "POST",
+            body: JSON.stringify(data)
+          }
+        );
+
+      }
+
+      showMessage(
+        message,
+        "Jogador salvo com sucesso.",
+        true
       );
+
+      await loadPlayers();
+
+      setTimeout(() => {
+
+        closePlayerModal();
+
+      }, 500);
+
+    } catch (error) {
+
+      showMessage(
+        message,
+        error.message
+      );
+    }
+
+  }
+);
+
+
+/* =========================================================
+   EXCLUIR JOGADOR
+========================================================= */
+
+window.deletePlayer = async function(id) {
+
+  const player =
+    playersData.find(
+      item => Number(item.id) === Number(id)
+    );
+
+  if (!player) return;
+
+  if (
+    !confirm(
+      `Excluir o jogador ${player.name}?`
+    )
+  ) {
+    return;
+  }
+
+  try {
+
+    await api(
+      `/api/players/${id}`,
+      {
+        method: "DELETE"
+      }
+    );
+
+    toast(
+      "Jogador excluído."
+    );
+
+    await loadPlayers();
+
+  } catch (error) {
+
+    toast(
+      error.message,
+      "error"
+    );
+  }
+};
+
+
+/* =========================================================
+   MODAL
+========================================================= */
+
+function closePlayerModal() {
+
+  $("#playerModal")
+    ?.classList
+    .add("hidden");
+
+  editingPlayerId = null;
+}
+
+
+window.closePlayerModal =
+  closePlayerModal;
+
+
+$("#closePlayerModal")?.addEventListener(
+  "click",
+  closePlayerModal
+);
+
+$("#cancelPlayerButton")?.addEventListener(
+  "click",
+  closePlayerModal
+);
+
+
+/* =========================================================
+   MEMBROS PARA VINCULAR AO JOGADOR
+========================================================= */
+
+async function loadMemberOptions(selectedId = null) {
+
+  const select =
+    $("#playerUser");
+
+  if (!select) return;
+
+  try {
+
+    const data =
+      await api("/api/members");
+
+    const members =
+      data.members || [];
+
+    select.innerHTML = `
+      <option value="">
+        Jogador sem conta vinculada
+      </option>
+    `;
+
+    members.forEach(member => {
+
+      const option =
+        document.createElement("option");
+
+      option.value =
+        member.id;
+
+      option.textContent =
+        `${member.name} — ${member.email}`;
+
+      if (
+        selectedId &&
+        Number(selectedId) === Number(member.id)
+      ) {
+        option.selected = true;
+      }
+
+      select.appendChild(option);
+
+    });
+
+  } catch (error) {
+
+    console.error(error);
+  }
+}
+
+
+/* =========================================================
+   CAPITÃO
+========================================================= */
+
+function renderCaptain() {
+
+  const captain =
+    playersData.find(
+      player =>
+        Number(player.is_captain) === 1
+    );
+
+  if ($("#captainName")) {
+
+    $("#captainName").textContent =
+      captain
+        ? captain.name
+        : "Nenhum capitão definido";
+  }
+}
+
+
+$("#removeCaptainButton")?.addEventListener(
+  "click",
+  async () => {
 
     try {
 
       await api(
-        '/api/polls',
+        "/api/players/captain",
         {
-          method: 'POST',
-
-          body:
-            JSON.stringify({
-              question:
-                form.get(
-                  'question'
-                ),
-
-              options:
-                String(
-                  form.get(
-                    'options'
-                  )
-                )
-                  .split(',')
-                  .map(
-                    value =>
-                      value.trim()
-                  )
-                  .filter(Boolean),
-
-              multiple:
-                form.get(
-                  'multiple'
-                ) === 'on'
-            })
+          method: "DELETE"
         }
       );
 
-      event.target.reset();
+      toast(
+        "Capitão removido."
+      );
 
-      await polls();
+      await loadPlayers();
 
     } catch (error) {
 
-      alert(
-        error.message
+      toast(
+        error.message,
+        "error"
       );
     }
-  };
+  }
+);
 
 
-/* =========================
-   PARTIDAS
-========================= */
+/* =========================================================
+   BATEDORES
+========================================================= */
 
-async function matches() {
+async function loadRoles() {
 
-  const result =
-    await api(
-      '/api/matches'
+  try {
+
+    const data =
+      await api("/api/player-roles");
+
+    const penalty =
+      data.penalty || [];
+
+    const freeKick =
+      data.free_kick || [];
+
+    renderRoleList(
+      $("#penaltyPlayers"),
+      penalty
     );
 
-  const list =
-    result.matches;
+    renderRoleList(
+      $("#freeKickPlayers"),
+      freeKick
+    );
 
-  $('#matches').innerHTML =
-    list.length
+    if ($("#penaltySelect")) {
 
-      ? list
-          .map(
-            match => `
-              <div class="item">
+      $("#penaltySelect").value =
+        penalty[0]?.player_id || "";
+    }
 
-                <b>
-                  ${esc(
-                    match.opponent
-                  )}
-                </b>
+    if ($("#freeKickSelect")) {
 
-                <div class="muted">
-                  ${match.date}
+      $("#freeKickSelect").value =
+        freeKick[0]?.player_id || "";
+    }
 
-                  ${
-                    match.time
-                      ? ' • ' +
-                        match.time
-                      : ''
-                  }
+  } catch (error) {
 
-                  ${
-                    match.location
-                      ? ' • ' +
-                        esc(
-                          match.location
-                        )
-                      : ''
-                  }
-                </div>
-
-                <div>
-                  ${esc(
-                    match.status
-                  )}
-
-                  ${
-                    match.result
-                      ? ' — ' +
-                        esc(
-                          match.result
-                        )
-                      : ''
-                  }
-                </div>
-
-                ${
-                  me.role === 'admin'
-                    ? `
-                      <button
-                        class="danger"
-                        onclick="delMatch(
-                          '${match.id}'
-                        )"
-                      >
-                        Excluir
-                      </button>
-                    `
-                    : ''
-                }
-
-              </div>
-            `
-          )
-          .join('')
-
-      : `
-        <p class="muted">
-          Nenhuma partida cadastrada.
-        </p>
-      `;
+    console.error(error);
+  }
 }
 
 
-window.delMatch =
-  async id => {
+function renderRoleList(container, list) {
+
+  if (!container) return;
+
+  if (!list.length) {
+
+    container.innerHTML =
+      `<span class="muted">Nenhum definido.</span>`;
+
+    return;
+  }
+
+  container.innerHTML =
+    list.map((item, index) => `
+      <div class="role-player">
+        ${index + 1}. ${esc(item.player_name)}
+      </div>
+    `).join("");
+}
+
+
+function updatePlayerSelects() {
+
+  const selects = [
+    $("#penaltySelect"),
+    $("#freeKickSelect")
+  ];
+
+  selects.forEach(select => {
+
+    if (!select) return;
+
+    const oldValue =
+      select.value;
+
+    select.innerHTML = `
+      <option value="">
+        Selecionar jogador
+      </option>
+    `;
+
+    playersData
+      .filter(player =>
+        player.status !== "inativo"
+      )
+      .forEach(player => {
+
+        const option =
+          document.createElement("option");
+
+        option.value =
+          player.id;
+
+        option.textContent =
+          `${player.name} — ${player.primary_position}`;
+
+        select.appendChild(option);
+
+      });
+
+    if (oldValue) {
+      select.value = oldValue;
+    }
+
+  });
+}
+
+
+$("#saveRolesButton")?.addEventListener(
+  "click",
+  async () => {
+
+    const message =
+      $("#rolesMessage");
+
+    try {
+
+      const penalty =
+        $("#penaltySelect").value;
+
+      const freeKick =
+        $("#freeKickSelect").value;
+
+      if (penalty) {
+
+        await api(
+          "/api/player-roles/penalty",
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              players: [
+                Number(penalty)
+              ]
+            })
+          }
+        );
+
+      } else {
+
+        await api(
+          "/api/player-roles/penalty",
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              players: []
+            })
+          }
+        );
+      }
+
+      if (freeKick) {
+
+        await api(
+          "/api/player-roles/free_kick",
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              players: [
+                Number(freeKick)
+              ]
+            })
+          }
+        );
+
+      } else {
+
+        await api(
+          "/api/player-roles/free_kick",
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              players: []
+            })
+          }
+        );
+      }
+
+      showMessage(
+        message,
+        "Funções salvas.",
+        true
+      );
+
+      await loadRoles();
+
+    } catch (error) {
+
+      showMessage(
+        message,
+        error.message
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   ESCALAÇÃO PRINCIPAL
+========================================================= */
+
+async function loadLineup() {
+
+  const court =
+    $(".court");
+
+  if (!court) return;
+
+  try {
+
+    const data =
+      await api("/api/players");
+
+    playersData =
+      data.players || [];
+
+    $$(".court-player").forEach(slot => {
+
+      const position =
+        slot.dataset.position;
+
+      const player =
+        playersData.find(
+          item =>
+            item.primary_position === position
+        );
+
+      const nameElement =
+        slot.querySelector(
+          ".court-player-name"
+        );
+
+      if (nameElement) {
+
+        nameElement.textContent =
+          player
+            ? player.name
+            : "Vazio";
+      }
+
+      slot.dataset.playerId =
+        player
+          ? player.id
+          : "";
+
+    });
+
+    renderLineupEditor();
+
+  } catch (error) {
+
+    console.error(error);
+  }
+}
+
+
+function renderLineupEditor() {
+
+  const editor =
+    $("#lineupEditor");
+
+  if (!editor) return;
+
+  const positions = [
+    "Goleiro",
+    "Fixo",
+    "Ala direita",
+    "Ala esquerda",
+    "Pivô"
+  ];
+
+  editor.innerHTML =
+    positions.map(position => {
+
+      const player =
+        playersData.find(
+          item =>
+            item.primary_position === position
+        );
+
+      return `
+        <div class="lineup-row">
+
+          <label>
+            ${esc(position)}
+          </label>
+
+          <select
+            data-lineup-position="${esc(position)}"
+          >
+
+            <option value="">
+              Selecionar jogador
+            </option>
+
+            ${
+              playersData
+                .map(item => `
+                  <option
+                    value="${item.id}"
+                    ${
+                      player &&
+                      Number(player.id) ===
+                      Number(item.id)
+                        ? "selected"
+                        : ""
+                    }
+                  >
+                    ${esc(item.name)}
+                  </option>
+                `)
+                .join("")
+            }
+
+          </select>
+
+        </div>
+      `;
+
+    }).join("");
+}
+
+
+$("#saveLineupButton")?.addEventListener(
+  "click",
+  async () => {
+
+    const message =
+      $("#lineupMessage");
+
+    try {
+
+      const selections =
+        $$("[data-lineup-position]");
+
+      for (const select of selections) {
+
+        const playerId =
+          select.value;
+
+        if (!playerId) continue;
+
+        await api(
+          `/api/players/${playerId}`,
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              primary_position:
+                select.dataset.lineupPosition
+            })
+          }
+        );
+      }
+
+      showMessage(
+        message,
+        "Escalação salva.",
+        true
+      );
+
+      await loadPlayers();
+      await loadLineup();
+
+    } catch (error) {
+
+      showMessage(
+        message,
+        error.message
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   ESCALAÇÃO POR PARTIDA
+========================================================= */
+
+async function loadMatchSelectors() {
+
+  const select =
+    $("#lineupMatchSelect");
+
+  if (!select) return;
+
+  select.innerHTML = `
+    <option value="">
+      Escolha uma partida
+    </option>
+  `;
+
+  matchesData.forEach(match => {
+
+    const option =
+      document.createElement("option");
+
+    option.value =
+      match.id;
+
+    option.textContent =
+      `${formatDate(match.date)} — ${match.opponent}`;
+
+    select.appendChild(option);
+
+  });
+}
+
+
+$("#lineupMatchSelect")?.addEventListener(
+  "change",
+  loadMatchLineup
+);
+
+
+async function loadMatchLineup() {
+
+  const select =
+    $("#lineupMatchSelect");
+
+  const editor =
+    $("#matchLineupEditor");
+
+  if (!select || !editor) return;
+
+  if (!select.value) {
+
+    editor.innerHTML = `
+      <p class="muted">
+        Selecione uma partida.
+      </p>
+    `;
+
+    return;
+  }
+
+  try {
+
+    const data =
+      await api(
+        `/api/matches/${select.value}/lineup`
+      );
+
+    const lineup =
+      data.lineup || [];
+
+    editor.innerHTML =
+      playersData.map(player => {
+
+        const existing =
+          lineup.find(
+            item =>
+              Number(item.player_id) ===
+              Number(player.id)
+          );
+
+        return `
+          <div class="match-player-row">
+
+            <label>
+              <input
+                type="checkbox"
+                data-match-player="${player.id}"
+                ${
+                  existing
+                    ? "checked"
+                    : ""
+                }
+              >
+
+              ${esc(player.name)}
+            </label>
+
+            <select
+              data-match-position="${player.id}"
+            >
+
+              ${[
+                "Goleiro",
+                "Fixo",
+                "Ala direita",
+                "Ala esquerda",
+                "Pivô"
+              ].map(position => `
+                <option
+                  value="${esc(position)}"
+                  ${
+                    existing &&
+                    existing.position === position
+                      ? "selected"
+                      : ""
+                  }
+                >
+                  ${esc(position)}
+                </option>
+              `).join("")}
+
+            </select>
+
+            <label>
+              <input
+                type="checkbox"
+                data-match-starter="${player.id}"
+                ${
+                  existing &&
+                  existing.starter
+                    ? "checked"
+                    : ""
+                }
+              >
+
+              Titular
+            </label>
+
+          </div>
+        `;
+
+      }).join("");
+
+  } catch (error) {
+
+    editor.innerHTML = `
+      <p class="err">
+        ${esc(error.message)}
+      </p>
+    `;
+  }
+}
+
+
+$("#saveMatchLineupButton")?.addEventListener(
+  "click",
+  async () => {
+
+    const matchId =
+      $("#lineupMatchSelect").value;
+
+    const message =
+      $("#matchLineupMessage");
+
+    if (!matchId) {
+
+      showMessage(
+        message,
+        "Selecione uma partida."
+      );
+
+      return;
+    }
+
+    try {
+
+      const rows =
+        $$("[data-match-player]");
+
+      const lineup = [];
+
+      rows.forEach(check => {
+
+        if (!check.checked) return;
+
+        const playerId =
+          check.dataset.matchPlayer;
+
+        const position =
+          $(
+            `[data-match-position="${playerId}"]`
+          ).value;
+
+        const starter =
+          $(
+            `[data-match-starter="${playerId}"]`
+          ).checked;
+
+        lineup.push({
+          player_id:
+            Number(playerId),
+
+          position,
+
+          starter,
+
+          instructions: ""
+        });
+
+      });
+
+      const starters =
+        lineup.filter(
+          player => player.starter
+        );
+
+      if (starters.length > 5) {
+
+        showMessage(
+          message,
+          "Uma equipe de futsal pode ter no máximo 5 titulares."
+        );
+
+        return;
+      }
+
+      await api(
+        `/api/matches/${matchId}/lineup`,
+        {
+          method: "PUT",
+
+          body: JSON.stringify({
+            lineup
+          })
+        }
+      );
+
+      showMessage(
+        message,
+        "Escalação da partida salva.",
+        true
+      );
+
+    } catch (error) {
+
+      showMessage(
+        message,
+        error.message
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   ENQUETES
+========================================================= */
+
+async function loadPolls() {
+
+  const container =
+    $("#pollsList");
+
+  if (!container) return;
+
+  try {
+
+    const data =
+      await api("/api/polls");
+
+    const polls =
+      data.polls || [];
+
+    if (!polls.length) {
+
+      container.innerHTML = `
+        <p class="muted">
+          Nenhuma enquete ainda.
+        </p>
+      `;
+
+      return;
+    }
+
+    container.innerHTML =
+      polls.map(poll => {
+
+        return `
+          <div class="poll-card">
+
+            <h3>
+              ${esc(poll.question)}
+            </h3>
+
+            <div class="poll-options">
+
+              ${
+                (poll.options || [])
+                  .map((option, index) => `
+                    <label class="choice">
+
+                      <input
+                        type="${
+                          poll.multiple
+                            ? "checkbox"
+                            : "radio"
+                        }"
+
+                        name="poll-${poll.id}"
+
+                        value="${index}"
+
+                        ${
+                          poll.hasVoted ||
+                          poll.closed
+                            ? "disabled"
+                            : ""
+                        }
+                      >
+
+                      ${esc(option)}
+
+                    </label>
+                  `)
+                  .join("")
+              }
+
+            </div>
+
+            ${
+              poll.closed
+                ? `
+                  <span class="muted">
+                    Encerrada
+                  </span>
+                `
+                : poll.hasVoted
+                ? `
+                  <span class="ok">
+                    Você já votou.
+                  </span>
+                `
+                : `
+                  <button
+                    onclick="votePoll(${poll.id}, ${Boolean(poll.multiple)})"
+                  >
+                    Votar
+                  </button>
+                `
+            }
+
+            <button
+              class="ghost"
+              onclick="showPollResults(${poll.id})"
+            >
+              Resultados
+            </button>
+
+            ${
+              me?.role === "admin" &&
+              !poll.closed
+                ? `
+                  <button
+                    class="danger"
+                    onclick="closePoll(${poll.id})"
+                  >
+                    Encerrar
+                  </button>
+                `
+                : ""
+            }
+
+          </div>
+        `;
+
+      }).join("");
+
+  } catch (error) {
+
+    console.error(error);
+  }
+}
+
+
+window.votePoll =
+  async function(id, multiple) {
+
+    const selected =
+      $$(`[name="poll-${id}"]:checked`)
+        .map(input =>
+          Number(input.value)
+        );
+
+    if (!selected.length) {
+
+      toast(
+        "Selecione uma opção.",
+        "error"
+      );
+
+      return;
+    }
+
+    try {
+
+      await api(
+        `/api/polls/${id}/vote`,
+        {
+          method: "POST",
+
+          body: JSON.stringify({
+            options: selected
+          })
+        }
+      );
+
+      toast(
+        "Voto registrado."
+      );
+
+      await loadPolls();
+
+    } catch (error) {
+
+      toast(
+        error.message,
+        "error"
+      );
+    }
+};
+
+
+window.showPollResults =
+  async function(id) {
+
+    try {
+
+      const data =
+        await api(
+          `/api/polls/${id}/results`
+        );
+
+      const text =
+        [
+          data.question,
+          "",
+          ...(data.results || [])
+            .map(item =>
+              `${item.label}: ${item.count}`
+            ),
+          "",
+          `Total de votos: ${data.total}`
+        ].join("\n");
+
+      alert(text);
+
+    } catch (error) {
+
+      toast(
+        error.message,
+        "error"
+      );
+    }
+};
+
+
+window.closePoll =
+  async function(id) {
 
     if (
       !confirm(
-        'Excluir esta partida?'
+        "Encerrar esta enquete?"
       )
     ) {
       return;
@@ -852,468 +1859,1081 @@ window.delMatch =
     try {
 
       await api(
-        '/api/matches/' +
-        id,
+        `/api/polls/${id}/close`,
         {
-          method: 'DELETE'
+          method: "POST"
         }
       );
 
-      await matches();
+      await loadPolls();
+
+      toast(
+        "Enquete encerrada."
+      );
 
     } catch (error) {
 
-      alert(
-        error.message
+      toast(
+        error.message,
+        "error"
       );
     }
-  };
+};
 
 
-$('#matchForm').onsubmit =
+/* =========================================================
+   CRIAR ENQUETE
+========================================================= */
+
+$("#newPollButton")?.addEventListener(
+  "click",
+  () => {
+
+    $("#pollCreateBox")
+      ?.classList
+      .toggle("hidden");
+
+  }
+);
+
+
+$("#cancelPollButton")?.addEventListener(
+  "click",
+  () => {
+
+    $("#pollCreateBox")
+      ?.classList
+      .add("hidden");
+
+  }
+);
+
+
+$("#addPollOptionButton")?.addEventListener(
+  "click",
+  () => {
+
+    const container =
+      $("#pollOptions");
+
+    const count =
+      container.querySelectorAll(
+        ".poll-option"
+      ).length;
+
+    const wrapper =
+      document.createElement("div");
+
+    wrapper.className =
+      "poll-option";
+
+    wrapper.innerHTML = `
+      <input
+        type="text"
+        placeholder="Opção ${count + 1}"
+      >
+
+      <button
+        type="button"
+        class="ghost remove-poll-option"
+      >
+        Remover
+      </button>
+    `;
+
+    wrapper
+      .querySelector(
+        ".remove-poll-option"
+      )
+      .addEventListener(
+        "click",
+        () => wrapper.remove()
+      );
+
+    container.appendChild(wrapper);
+
+  }
+);
+
+
+$("#pollForm")?.addEventListener(
+  "submit",
   async event => {
 
     event.preventDefault();
 
-    const form =
-      new FormData(
-        event.target
+    const options =
+      $$("#pollOptions input")
+        .map(input =>
+          input.value.trim()
+        )
+        .filter(Boolean);
+
+    if (options.length < 2) {
+
+      showMessage(
+        $("#pollMessage"),
+        "Adicione pelo menos 2 opções."
       );
+
+      return;
+    }
 
     try {
 
       await api(
-        '/api/matches',
+        "/api/polls",
         {
-          method: 'POST',
+          method: "POST",
 
-          body:
-            JSON.stringify(
-              Object.fromEntries(
-                form
-              )
-            )
+          body: JSON.stringify({
+
+            question:
+              $("#pollQuestion")
+                .value
+                .trim(),
+
+            options,
+
+            closes_at:
+              $("#pollCloseDate").value
+                || null,
+
+            multiple:
+              $("#pollMultiple").checked
+
+          })
         }
       );
 
       event.target.reset();
 
-      await matches();
+      $("#pollCreateBox")
+        .classList
+        .add("hidden");
+
+      showMessage(
+        $("#pollMessage"),
+        "Enquete criada.",
+        true
+      );
+
+      await loadPolls();
 
     } catch (error) {
 
-      alert(
+      showMessage(
+        $("#pollMessage"),
         error.message
       );
     }
-  };
+  }
+);
 
 
-/* =========================
-   ESCALAÇÃO
-========================= */
+/* =========================================================
+   PARTIDAS
+========================================================= */
 
-async function lineup() {
+async function loadMatches() {
 
-  const result =
-    await api(
-      '/api/lineup'
-    );
+  const container =
+    $("#matchesList");
 
-  const players =
-    result.lineup;
+  if (!container) return;
 
-  $('#lineup').innerHTML =
-    players.length
+  try {
 
-      ? players
-          .map(
-            player => `
-              <div class="item">
+    const data =
+      await api("/api/matches");
 
-                <b>
-                  ${esc(
-                    player.player_name
-                  )}
-                </b>
+    matchesData =
+      data.matches || [];
 
-                <span class="muted">
-                  ${esc(
-                    player.position ||
-                    ''
-                  )}
-                </span>
+    if (!matchesData.length) {
 
-                ${
-                  player.starter
-                    ? ' — titular'
-                    : ''
-                }
-
-                ${
-                  player.injured
-                    ? ' — lesionado'
-                    : ''
-                }
-
-              </div>
-            `
-          )
-          .join('')
-
-      : `
+      container.innerHTML = `
         <p class="muted">
-          Escalação ainda não cadastrada.
+          Nenhuma partida cadastrada.
         </p>
       `;
+
+    } else {
+
+      container.innerHTML =
+        matchesData.map(match => `
+
+          <div class="match-card">
+
+            <h3>
+              Beiçola F.I.
+              <span>vs.</span>
+              ${esc(match.opponent)}
+            </h3>
+
+            <div class="muted">
+              ${formatDate(match.date)}
+
+              ${
+                match.time
+                  ? ` • ${esc(match.time)}`
+                  : ""
+              }
+
+              ${
+                match.location
+                  ? ` • ${esc(match.location)}`
+                  : ""
+              }
+            </div>
+
+            ${
+              match.result
+                ? `
+                  <strong>
+                    Resultado:
+                    ${esc(match.result)}
+                  </strong>
+                `
+                : ""
+            }
+
+            ${
+              match.notes
+                ? `
+                  <p>
+                    ${esc(match.notes)}
+                  </p>
+                `
+                : ""
+            }
+
+            ${
+              me?.role === "admin"
+                ? `
+                  <button
+                    class="danger"
+                    onclick="deleteMatch(${match.id})"
+                  >
+                    Excluir
+                  </button>
+                `
+                : ""
+            }
+
+          </div>
+
+        `).join("");
+    }
+
+    await loadMatchSelectors();
+
+  } catch (error) {
+
+    console.error(error);
+  }
 }
 
 
-/* =========================
+/* =========================================================
+   CRIAR PARTIDA
+========================================================= */
+
+$("#newMatchButton")?.addEventListener(
+  "click",
+  () => {
+
+    $("#matchCreateBox")
+      ?.classList
+      .toggle("hidden");
+
+  }
+);
+
+
+$("#cancelMatchButton")?.addEventListener(
+  "click",
+  () => {
+
+    $("#matchCreateBox")
+      ?.classList
+      .add("hidden");
+
+  }
+);
+
+
+$("#matchForm")?.addEventListener(
+  "submit",
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      await api(
+        "/api/matches",
+        {
+          method: "POST",
+
+          body: JSON.stringify({
+
+            opponent:
+              $("#matchOpponent").value.trim(),
+
+            date:
+              $("#matchDate").value,
+
+            location:
+              $("#matchLocation").value.trim(),
+
+            result:
+              $("#matchResult").value.trim(),
+
+            notes:
+              $("#matchNotes").value.trim()
+
+          })
+        }
+      );
+
+      event.target.reset();
+
+      $("#matchCreateBox")
+        .classList
+        .add("hidden");
+
+      showMessage(
+        $("#matchMessage"),
+        "Partida cadastrada.",
+        true
+      );
+
+      await loadMatches();
+      await loadDashboard();
+
+    } catch (error) {
+
+      showMessage(
+        $("#matchMessage"),
+        error.message
+      );
+    }
+  }
+);
+
+
+window.deleteMatch =
+  async function(id) {
+
+    if (
+      !confirm(
+        "Excluir esta partida?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+
+      await api(
+        `/api/matches/${id}`,
+        {
+          method: "DELETE"
+        }
+      );
+
+      await loadMatches();
+      await loadDashboard();
+
+      toast(
+        "Partida excluída."
+      );
+
+    } catch (error) {
+
+      toast(
+        error.message,
+        "error"
+      );
+    }
+};
+
+
+/* =========================================================
    AVISOS
-========================= */
+========================================================= */
 
-async function announcements() {
+async function loadAnnouncements() {
 
-  const result =
-    await api(
-      '/api/announcements'
-    );
+  const container =
+    $("#announcementsList");
 
-  const list =
-    result.announcements;
+  if (!container) return;
 
-  $('#announcements').innerHTML =
-    list.length
+  try {
 
-      ? list
-          .map(
-            announcement => `
-              <div class="item">
+    const data =
+      await api("/api/announcements");
 
-                <b>
-                  ${esc(
-                    announcement.title
-                  )}
-                </b>
+    const list =
+      data.announcements || [];
 
-                <p>
-                  ${esc(
-                    announcement.body
-                  )}
-                </p>
+    if (!list.length) {
 
-                <span class="muted">
-                  ${new Date(
-                    announcement.created_at
-                  ).toLocaleString(
-                    'pt-BR'
-                  )}
-                </span>
-
-              </div>
-            `
-          )
-          .join('')
-
-      : `
+      container.innerHTML = `
         <p class="muted">
-          Nenhum aviso.
+          Nenhum aviso publicado.
         </p>
       `;
+
+      return;
+    }
+
+    container.innerHTML =
+      list.map(item => `
+
+        <article class="announcement-card">
+
+          <h3>
+            ${esc(item.title)}
+          </h3>
+
+          <p>
+            ${esc(item.body || item.content || "")}
+          </p>
+
+          <span class="muted">
+            ${formatDateTime(item.created_at)}
+          </span>
+
+          ${
+            me?.role === "admin"
+              ? `
+                <button
+                  class="danger"
+                  onclick="deleteAnnouncement(${item.id})"
+                >
+                  Excluir
+                </button>
+              `
+              : ""
+          }
+
+        </article>
+
+      `).join("");
+
+  } catch (error) {
+
+    console.error(error);
+  }
 }
 
 
-$('#noticeForm').onsubmit =
-  async event => {
+$("#newAnnouncementButton")?.addEventListener(
+  "click",
+  () => {
 
-    event.preventDefault();
+    $("#announcementCreateBox")
+      ?.classList
+      .toggle("hidden");
 
-    const form =
-      new FormData(
-        event.target
-      );
-
-    try {
-
-      await api(
-        '/api/announcements',
-        {
-          method: 'POST',
-
-          body:
-            JSON.stringify(
-              Object.fromEntries(
-                form
-              )
-            )
-        }
-      );
-
-      event.target.reset();
-
-      await announcements();
-
-    } catch (error) {
-
-      alert(
-        error.message
-      );
-    }
-  };
+  }
+);
 
 
-/* =========================
-   MEMBROS
-========================= */
+$("#cancelAnnouncementButton")?.addEventListener(
+  "click",
+  () => {
 
-async function members() {
+    $("#announcementCreateBox")
+      ?.classList
+      .add("hidden");
 
-  const result =
-    await api(
-      '/api/members'
-    );
-
-  const list =
-    result.members;
-
-  $('#members').innerHTML =
-    list.length
-
-      ? list
-          .map(
-            user => `
-              <div class="item">
-
-                <b>
-                  ${esc(
-                    user.name
-                  )}
-                </b>
-
-                <div class="muted">
-
-                  ${esc(
-                    user.email
-                  )}
-
-                  •
-                  ${user.role}
-
-                </div>
-
-                ${
-                  me.role === 'admin' &&
-                  user.id !== me.id
-
-                    ? `
-                      <button
-                        onclick="changeRole(
-                          '${user.id}',
-                          '${
-                            user.role ===
-                            'admin'
-                              ? 'member'
-                              : 'admin'
-                          }'
-                        )"
-                      >
-                        Tornar ${
-                          user.role ===
-                          'admin'
-                            ? 'integrante'
-                            : 'admin'
-                        }
-                      </button>
-                    `
-
-                    : ''
-                }
-
-              </div>
-            `
-          )
-          .join('')
-
-      : `
-        <p class="muted">
-          Nenhum membro.
-        </p>
-      `;
-}
+  }
+);
 
 
-window.changeRole =
-  async (
-    id,
-    role
-  ) => {
-
-    try {
-
-      await api(
-        '/api/members/' +
-        id +
-        '/role',
-        {
-          method: 'PUT',
-
-          body:
-            JSON.stringify({
-              role
-            })
-        }
-      );
-
-      await members();
-
-    } catch (error) {
-
-      alert(
-        error.message
-      );
-    }
-  };
-
-
-/* Mantém compatibilidade
-   com o nome antigo da função. */
-
-window.role =
-  window.changeRole;
-
-
-/* =========================
-   PERFIL
-========================= */
-
-$('#profileForm').onsubmit =
+$("#announcementForm")?.addEventListener(
+  "submit",
   async event => {
 
     event.preventDefault();
 
     try {
 
-      const form =
-        new FormData(
-          event.target
-        );
+      await api(
+        "/api/announcements",
+        {
+          method: "POST",
 
-      const result =
-        await api(
-          '/api/profile',
-          {
-            method: 'PUT',
+          body: JSON.stringify({
+
+            title:
+              $("#announcementTitle")
+                .value
+                .trim(),
 
             body:
-              JSON.stringify(
-                Object.fromEntries(
-                  form
-                )
-              )
+              $("#announcementContent")
+                .value
+                .trim()
+
+          })
+        }
+      );
+
+      event.target.reset();
+
+      $("#announcementCreateBox")
+        .classList
+        .add("hidden");
+
+      showMessage(
+        $("#announcementMessage"),
+        "Aviso publicado.",
+        true
+      );
+
+      await loadAnnouncements();
+      await loadDashboard();
+
+    } catch (error) {
+
+      showMessage(
+        $("#announcementMessage"),
+        error.message
+      );
+    }
+  }
+);
+
+
+window.deleteAnnouncement =
+  async function(id) {
+
+    if (
+      !confirm(
+        "Excluir este aviso?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+
+      await api(
+        `/api/announcements/${id}`,
+        {
+          method: "DELETE"
+        }
+      );
+
+      await loadAnnouncements();
+
+    } catch (error) {
+
+      toast(
+        error.message,
+        "error"
+      );
+    }
+};
+
+
+/* =========================================================
+   PERFIL
+========================================================= */
+
+function loadProfile() {
+
+  if (!me) return;
+
+  $("#profileName").value =
+    me.name || "";
+
+  $("#profileEmail").value =
+    me.email || "";
+
+  $("#profileRole").value =
+    me.role === "admin"
+      ? "Administrador"
+      : "Integrante";
+}
+
+
+$("#profileForm")?.addEventListener(
+  "submit",
+  async event => {
+
+    event.preventDefault();
+
+    try {
+
+      const data =
+        await api(
+          "/api/profile",
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              name:
+                $("#profileName").value.trim()
+            })
           }
         );
 
       me =
-        result.user;
+        data.user;
 
-      $('#userName')
-        .textContent =
+      $("#headerUserName").textContent =
         me.name;
 
-      msg(
-        $('#profileMsg'),
-        'Nome salvo.',
+      showMessage(
+        $("#profileMessage"),
+        "Perfil atualizado.",
         true
       );
 
+      await loadDashboard();
+
     } catch (error) {
 
-      msg(
-        $('#profileMsg'),
+      showMessage(
+        $("#profileMessage"),
         error.message
       );
     }
-  };
+  }
+);
 
 
-/* =========================
+/* =========================================================
    ALTERAR SENHA
-========================= */
+========================================================= */
 
-$('#passwordForm').onsubmit =
+$("#passwordForm")?.addEventListener(
+  "submit",
+  async event => {
+
+    event.preventDefault();
+
+    const newPassword =
+      $("#newPassword").value;
+
+    const confirmation =
+      $("#confirmNewPassword").value;
+
+    if (
+      newPassword !== confirmation
+    ) {
+
+      showMessage(
+        $("#passwordMessage"),
+        "As novas senhas não são iguais."
+      );
+
+      return;
+    }
+
+    try {
+
+      const data =
+        await api(
+          "/api/change-password",
+          {
+            method: "POST",
+
+            body: JSON.stringify({
+
+              current_password:
+                $("#currentPassword").value,
+
+              new_password:
+                newPassword
+
+            })
+          }
+        );
+
+      showMessage(
+        $("#passwordMessage"),
+        data.message ||
+        "Senha alterada.",
+        true
+      );
+
+      event.target.reset();
+
+    } catch (error) {
+
+      showMessage(
+        $("#passwordMessage"),
+        error.message
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   ADMIN — MEMBROS
+========================================================= */
+
+async function loadMembers() {
+
+  const container =
+    $("#membersList");
+
+  if (!container) return;
+
+  try {
+
+    const data =
+      await api("/api/members");
+
+    const members =
+      data.members || [];
+
+    if (!members.length) {
+
+      container.innerHTML = `
+        <p class="muted">
+          Nenhum integrante.
+        </p>
+      `;
+
+      return;
+    }
+
+    container.innerHTML =
+      members.map(member => {
+
+        const isMe =
+          Number(member.id) ===
+          Number(me?.id);
+
+        const newRole =
+          member.role === "admin"
+            ? "member"
+            : "admin";
+
+        return `
+          <div class="member-card">
+
+            <div>
+
+              <strong>
+                ${esc(member.name)}
+              </strong>
+
+              <div class="muted">
+                ${esc(member.email)}
+              </div>
+
+              <span>
+                ${
+                  member.role === "admin"
+                    ? "Administrador"
+                    : "Integrante"
+                }
+              </span>
+
+            </div>
+
+            ${
+              !isMe &&
+              me?.role === "admin"
+                ? `
+                  <button
+                    onclick="changeMemberRole(
+                      ${member.id},
+                      '${newRole}'
+                    )"
+                  >
+                    ${
+                      member.role === "admin"
+                        ? "Tornar integrante"
+                        : "Tornar administrador"
+                    }
+                  </button>
+                `
+                : ""
+            }
+
+          </div>
+        `;
+
+      }).join("");
+
+  } catch (error) {
+
+    console.error(error);
+  }
+}
+
+
+window.changeMemberRole =
+  async function(id, role) {
+
+    try {
+
+      await api(
+        `/api/members/${id}/role`,
+        {
+          method: "PUT",
+
+          body: JSON.stringify({
+            role
+          })
+        }
+      );
+
+      toast(
+        "Permissão atualizada."
+      );
+
+      await loadMembers();
+
+    } catch (error) {
+
+      toast(
+        error.message,
+        "error"
+      );
+    }
+};
+
+
+/* =========================================================
+   PRIMEIRO ADMIN
+========================================================= */
+
+async function checkAdminSetup() {
+
+  const box =
+    $("#setupAdminBox");
+
+  if (!box) return;
+
+  try {
+
+    const data =
+      await api(
+        "/api/setup-admin/status"
+      );
+
+    if (data.available) {
+
+      box.classList.remove(
+        "hidden"
+      );
+
+    } else {
+
+      box.classList.add(
+        "hidden"
+      );
+    }
+
+  } catch {
+
+    box.classList.add(
+      "hidden"
+    );
+  }
+}
+
+
+$("#setupAdminForm")?.addEventListener(
+  "submit",
   async event => {
 
     event.preventDefault();
 
     try {
 
-      const form =
-        new FormData(
-          event.target
-        );
+      await api(
+        "/api/setup-admin",
+        {
+          method: "POST",
 
-      const result =
-        await api(
-          '/api/change-password',
-          {
-            method: 'POST',
+          body: JSON.stringify({
 
-            body:
-              JSON.stringify(
-                Object.fromEntries(
-                  form
-                )
-              )
-          }
-        );
+            key:
+              $("#setupAdminKey").value,
 
-      msg(
-        $('#profileMsg'),
-        result.message,
+            name:
+              $("#setupAdminName")
+                .value
+                .trim(),
+
+            email:
+              $("#setupAdminEmail")
+                .value
+                .trim(),
+
+            password:
+              $("#setupAdminPassword")
+                .value
+
+          })
+        }
+      );
+
+      showMessage(
+        $("#setupAdminMessage"),
+        "Administrador criado. Agora faça login.",
         true
       );
 
-      setTimeout(
-        () => location.reload(),
-        1200
-      );
+      event.target.reset();
+
+      setTimeout(() => {
+
+        $("#loginEmail").value =
+          $("#setupAdminEmail").value;
+
+      }, 500);
 
     } catch (error) {
 
-      msg(
-        $('#profileMsg'),
+      showMessage(
+        $("#setupAdminMessage"),
         error.message
       );
     }
+  }
+);
+
+
+/* =========================================================
+   UTILITÁRIOS
+========================================================= */
+
+function parsePositions(value) {
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  try {
+
+    const parsed =
+      JSON.parse(value);
+
+    return Array.isArray(parsed)
+      ? parsed
+      : [];
+
+  } catch {
+
+    return String(value)
+      .split(",")
+      .map(item => item.trim())
+      .filter(Boolean);
+  }
+}
+
+
+function statusLabel(status) {
+
+  const labels = {
+
+    disponivel:
+      "Disponível",
+
+    duvida:
+      "Em dúvida",
+
+    lesionado:
+      "Lesionado",
+
+    suspenso:
+      "Suspenso",
+
+    inativo:
+      "Inativo"
+
   };
 
+  return labels[status] ||
+    status ||
+    "Disponível";
+}
 
-/* =========================
-   SEGURANÇA HTML
-========================= */
+
+function formatDate(date) {
+
+  if (!date) {
+    return "Data não definida";
+  }
+
+  const parsed =
+    new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleDateString(
+    "pt-BR"
+  );
+}
+
+
+function formatDateTime(date) {
+
+  if (!date) return "";
+
+  const parsed =
+    new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleString(
+    "pt-BR"
+  );
+}
+
 
 function esc(value) {
 
   return String(
-    value ?? ''
+    value ?? ""
   ).replace(
     /[&<>'"]/g,
     character => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      "'": '&#39;',
-      '"': '&quot;'
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "'": "&#39;",
+      '"': "&quot;"
     })[character]
   );
 }
 
 
-/* =========================
-   INÍCIO
-========================= */
+/* =========================================================
+   INICIALIZAÇÃO
+========================================================= */
 
-checkAdminSetup();
+document.addEventListener(
+  "DOMContentLoaded",
+  async () => {
 
-load();
+    setupAuthTabs();
+
+    setupNavigation();
+
+    await loadApp();
+
+  }
+);
