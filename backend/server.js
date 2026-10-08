@@ -40,7 +40,13 @@ let db;
 async function initDatabase() {
   const SQL = await initSqlJs({
     locateFile: (file) =>
-      path.join(__dirname, "node_modules", "sql.js", "dist", file)
+      path.join(
+        __dirname,
+        "node_modules",
+        "sql.js",
+        "dist",
+        file
+      )
   });
 
   if (fs.existsSync(DB_FILE)) {
@@ -53,10 +59,6 @@ async function initDatabase() {
   db.run(`
     PRAGMA foreign_keys = ON;
 
-    /* =====================================================
-       USUÁRIOS
-    ===================================================== */
-
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -66,10 +68,6 @@ async function initDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
-    /* =====================================================
-       SESSÕES
-    ===================================================== */
-
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -78,10 +76,6 @@ async function initDatabase() {
         REFERENCES users(id)
         ON DELETE CASCADE
     );
-
-    /* =====================================================
-       RECUPERAÇÃO DE SENHA
-    ===================================================== */
 
     CREATE TABLE IF NOT EXISTS password_resets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,10 +88,6 @@ async function initDatabase() {
         ON DELETE CASCADE
     );
 
-    /* =====================================================
-       ENQUETES
-    ===================================================== */
-
     CREATE TABLE IF NOT EXISTS polls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       question TEXT NOT NULL,
@@ -109,10 +99,6 @@ async function initDatabase() {
       FOREIGN KEY (created_by)
         REFERENCES users(id)
     );
-
-    /* =====================================================
-       VOTOS
-    ===================================================== */
 
     CREATE TABLE IF NOT EXISTS votes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,10 +114,6 @@ async function initDatabase() {
         ON DELETE CASCADE
     );
 
-    /* =====================================================
-       JOGOS
-    ===================================================== */
-
     CREATE TABLE IF NOT EXISTS matches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       opponent TEXT NOT NULL,
@@ -141,10 +123,6 @@ async function initDatabase() {
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-
-    /* =====================================================
-       AVISOS
-    ===================================================== */
 
     CREATE TABLE IF NOT EXISTS announcements (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,11 +134,8 @@ async function initDatabase() {
         REFERENCES users(id)
     );
 
-    /* =====================================================
-       ESCALAÇÃO ANTIGA
-       Mantida para não quebrar seu sistema atual.
-    ===================================================== */
-
+    /* Sistema antigo de escalação.
+       Mantido para compatibilidade. */
     CREATE TABLE IF NOT EXISTS lineup (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_name TEXT NOT NULL,
@@ -176,56 +151,14 @@ async function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS players (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-      /*
-       * user_id permite transformar um membro
-       * existente em jogador.
-       */
       user_id INTEGER UNIQUE,
-
       name TEXT NOT NULL,
-
-      /*
-       * Número da camisa.
-       * Pode ficar NULL enquanto não definido.
-       */
       number INTEGER UNIQUE,
-
-      /*
-       * Exemplo:
-       * goleiro
-       * fixo
-       * ala direito
-       * ala esquerdo
-       * pivô
-       */
       primary_position TEXT NOT NULL,
-
-      /*
-       * JSON:
-       * ["ala direito", "fixo"]
-       */
       secondary_positions TEXT NOT NULL DEFAULT '[]',
-
-      /*
-       * disponivel
-       * duvida
-       * lesionado
-       * suspenso
-       * inativo
-       */
       status TEXT NOT NULL DEFAULT 'disponivel',
-
-      /*
-       * Instruções gerais do jogador.
-       */
       instructions TEXT NOT NULL DEFAULT '',
-
-      /*
-       * Apenas um jogador pode ser capitão.
-       */
       is_captain INTEGER NOT NULL DEFAULT 0,
-
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -240,20 +173,8 @@ async function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS player_roles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-
       player_id INTEGER NOT NULL,
-
-      /*
-       * penalty
-       * free_kick
-       */
       role TEXT NOT NULL,
-
-      /*
-       * 1 = primeiro
-       * 2 = segundo
-       * etc.
-       */
       priority INTEGER NOT NULL DEFAULT 1,
 
       UNIQUE(player_id, role, priority),
@@ -264,30 +185,15 @@ async function initDatabase() {
     );
 
     /* =====================================================
-       ESCALAÇÃO ESPECÍFICA POR JOGO
+       ESCALAÇÃO POR JOGO
     ===================================================== */
 
     CREATE TABLE IF NOT EXISTS match_lineup (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-
       match_id INTEGER NOT NULL,
-
       player_id INTEGER NOT NULL,
-
-      /*
-       * Posição que ele vai ocupar naquele jogo.
-       */
       position TEXT NOT NULL,
-
-      /*
-       * 1 = titular
-       * 0 = reserva
-       */
       starter INTEGER NOT NULL DEFAULT 0,
-
-      /*
-       * Instrução específica para aquela partida.
-       */
       instructions TEXT NOT NULL DEFAULT '',
 
       UNIQUE(match_id, player_id),
@@ -307,7 +213,6 @@ async function initDatabase() {
 
 function saveDb() {
   const data = db.export();
-
   fs.writeFileSync(
     DB_FILE,
     Buffer.from(data)
@@ -328,7 +233,10 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-async function enviarEmailRecuperacao(email, token) {
+async function enviarEmailRecuperacao(
+  email,
+  token
+) {
   if (
     !process.env.SMTP_HOST ||
     !process.env.SMTP_USER ||
@@ -369,7 +277,7 @@ async function enviarEmailRecuperacao(email, token) {
 }
 
 /* =========================================================
-   RATE LIMITS
+   RATE LIMIT
 ========================================================= */
 
 const loginLimiter = rateLimit({
@@ -420,8 +328,46 @@ const setupAdminLimiter = rateLimit({
    FUNÇÕES AUXILIARES
 ========================================================= */
 
+function rowToObject(result) {
+  const columns = result.columns;
+  const values = result.values[0];
+
+  const obj = {};
+
+  columns.forEach((column, index) => {
+    obj[column] = values[index];
+  });
+
+  return obj;
+}
+
+function getRows(sql, params = []) {
+  const result = db.exec(sql, params);
+
+  if (!result.length) {
+    return [];
+  }
+
+  const columns = result[0].columns;
+
+  return result[0].values.map((values) => {
+    const obj = {};
+
+    columns.forEach((column, index) => {
+      obj[column] = values[index];
+    });
+
+    return obj;
+  });
+}
+
+function getOne(sql, params = []) {
+  const rows = getRows(sql, params);
+  return rows.length ? rows[0] : null;
+}
+
 function getUserById(id) {
-  const result = db.exec(
+  return getOne(
     `
       SELECT
         id,
@@ -434,19 +380,10 @@ function getUserById(id) {
     `,
     [id]
   );
-
-  if (
-    !result.length ||
-    !result[0].values.length
-  ) {
-    return null;
-  }
-
-  return rowToObject(result[0]);
 }
 
 function getUserByEmail(email) {
-  const result = db.exec(
+  return getOne(
     `
       SELECT *
       FROM users
@@ -454,81 +391,9 @@ function getUserByEmail(email) {
     `,
     [email]
   );
-
-  if (
-    !result.length ||
-    !result[0].values.length
-  ) {
-    return null;
-  }
-
-  return rowToObject(result[0]);
 }
 
-function rowToObject(result) {
-  const columns = result.columns;
-  const values = result.values[0];
-
-  const obj = {};
-
-  columns.forEach(
-    (column, index) => {
-      obj[column] = values[index];
-    }
-  );
-
-  return obj;
-}
-
-function getRows(
-  sql,
-  params = []
-) {
-  const result = db.exec(
-    sql,
-    params
-  );
-
-  if (!result.length) {
-    return [];
-  }
-
-  const columns =
-    result[0].columns;
-
-  return result[0].values.map(
-    (values) => {
-      const obj = {};
-
-      columns.forEach(
-        (column, index) => {
-          obj[column] =
-            values[index];
-        }
-      );
-
-      return obj;
-    }
-  );
-}
-
-function getOne(
-  sql,
-  params = []
-) {
-  const rows = getRows(
-    sql,
-    params
-  );
-
-  return rows.length
-    ? rows[0]
-    : null;
-}
-
-function randomToken(
-  bytes = 32
-) {
+function randomToken(bytes = 32) {
   return crypto
     .randomBytes(bytes)
     .toString("hex");
@@ -542,22 +407,16 @@ function hashToken(token) {
 }
 
 function adminCount() {
-  const row = getOne(
-    `
-      SELECT COUNT(*) AS count
-      FROM users
-      WHERE role = 'admin'
-    `
-  );
+  const row = getOne(`
+    SELECT COUNT(*) AS count
+    FROM users
+    WHERE role = 'admin'
+  `);
 
-  return Number(
-    row?.count || 0
-  );
+  return Number(row?.count || 0);
 }
 
-function setupAdminKeyValid(
-  key
-) {
+function setupAdminKeyValid(key) {
   const configuredKey =
     process.env.ADMIN_SETUP_KEY;
 
@@ -572,10 +431,6 @@ function setupAdminKeyValid(
     return false;
   }
 
-  /*
-   * timingSafeEqual exige buffers
-   * com o mesmo tamanho.
-   */
   if (
     key.length !==
     configuredKey.length
@@ -603,25 +458,11 @@ function normalizeStatus(status) {
     : "disponivel";
 }
 
-function normalizePosition(position) {
-  const allowed = [
-    "goleiro",
-    "fixo",
-    "ala direito",
-    "ala esquerdo",
-    "pivô"
-  ];
-
-  return allowed.includes(
-    String(position).toLowerCase()
-  );
-}
-
 /* =========================================================
    AUTENTICAÇÃO
 ========================================================= */
 
-async function authMiddleware(
+function authMiddleware(
   req,
   res,
   next
@@ -695,7 +536,6 @@ async function authMiddleware(
     );
 
     req.user = null;
-
     next();
   }
 }
@@ -742,7 +582,7 @@ function requireAdmin(
 app.use(authMiddleware);
 
 /* =========================================================
-   API — STATUS
+   HEALTH
 ========================================================= */
 
 app.get(
@@ -750,14 +590,13 @@ app.get(
   (req, res) => {
     res.json({
       ok: true,
-      service:
-        "Beiçola F.I."
+      service: "Beiçola F.I."
     });
   }
 );
 
 /* =========================================================
-   API — USUÁRIO ATUAL
+   USUÁRIO ATUAL
 ========================================================= */
 
 app.get(
@@ -777,7 +616,7 @@ app.get(
 );
 
 /* =========================================================
-   API — CADASTRO
+   CADASTRO
 ========================================================= */
 
 app.post(
@@ -820,21 +659,14 @@ app.post(
         });
       }
 
-      if (
-        password.length < 8
-      ) {
+      if (password.length < 8) {
         return res.status(400).json({
           error:
             "A senha deve ter pelo menos 8 caracteres."
         });
       }
 
-      const existing =
-        getUserByEmail(
-          email
-        );
-
-      if (existing) {
+      if (getUserByEmail(email)) {
         return res.status(409).json({
           error:
             "Este e-mail já está cadastrado."
@@ -886,7 +718,7 @@ app.post(
 );
 
 /* =========================================================
-   API — LOGIN
+   LOGIN
 ========================================================= */
 
 app.post(
@@ -917,9 +749,7 @@ app.post(
       }
 
       const user =
-        getUserByEmail(
-          email
-        );
+        getUserByEmail(email);
 
       if (!user) {
         return res.status(401).json({
@@ -1016,7 +846,7 @@ app.post(
 );
 
 /* =========================================================
-   API — LOGOUT
+   LOGOUT
 ========================================================= */
 
 app.post(
@@ -1050,7 +880,7 @@ app.post(
 );
 
 /* =========================================================
-   API — CONFIGURAÇÃO DO PRIMEIRO ADMIN
+   PRIMEIRO ADMIN
 ========================================================= */
 
 app.get(
@@ -1071,9 +901,7 @@ app.post(
   setupAdminLimiter,
   async (req, res) => {
     try {
-      if (
-        adminCount() > 0
-      ) {
+      if (adminCount() > 0) {
         return res.status(403).json({
           error:
             "A configuração inicial já foi concluída."
@@ -1124,21 +952,14 @@ app.post(
         });
       }
 
-      if (
-        password.length < 8
-      ) {
+      if (password.length < 8) {
         return res.status(400).json({
           error:
             "A senha deve ter pelo menos 8 caracteres."
         });
       }
 
-      const existing =
-        getUserByEmail(
-          email
-        );
-
-      if (existing) {
+      if (getUserByEmail(email)) {
         return res.status(409).json({
           error:
             "Este e-mail já está cadastrado."
@@ -1190,7 +1011,7 @@ app.post(
 );
 
 /* =========================================================
-   API — RECUPERAÇÃO DE SENHA
+   RECUPERAÇÃO DE SENHA
 ========================================================= */
 
 app.post(
@@ -1212,15 +1033,13 @@ app.post(
         });
       }
 
-      const user =
-        getUserByEmail(
-          email
-        );
-
       const genericResponse = {
         message:
           "Se o e-mail estiver cadastrado, você receberá as instruções para recuperar sua senha."
       };
+
+      const user =
+        getUserByEmail(email);
 
       if (!user) {
         return res.json(
@@ -1291,7 +1110,7 @@ app.post(
 );
 
 /* =========================================================
-   API — RESET DA SENHA
+   RESET DE SENHA
 ========================================================= */
 
 app.post(
@@ -1318,9 +1137,7 @@ app.post(
         });
       }
 
-      if (
-        password.length < 8
-      ) {
+      if (password.length < 8) {
         return res.status(400).json({
           error:
             "A senha deve ter pelo menos 8 caracteres."
@@ -1351,10 +1168,7 @@ app.post(
         });
       }
 
-      if (
-        Number(reset.used) ===
-        1
-      ) {
+      if (Number(reset.used) === 1) {
         return res.status(400).json({
           error:
             "Este link de recuperação já foi utilizado."
@@ -1367,7 +1181,7 @@ app.post(
       ) {
         return res.status(400).json({
           error:
-            "Este link de recuperação expirou. Solicite um novo."
+            "Este link de recuperação expirou."
         });
       }
 
@@ -1427,7 +1241,7 @@ app.post(
 );
 
 /* =========================================================
-   API — ALTERAR SENHA LOGADO
+   ALTERAR SENHA
 ========================================================= */
 
 app.post(
@@ -1457,9 +1271,7 @@ app.post(
         });
       }
 
-      if (
-        newPassword.length < 8
-      ) {
+      if (newPassword.length < 8) {
         return res.status(400).json({
           error:
             "A nova senha deve ter pelo menos 8 caracteres."
@@ -1467,7 +1279,7 @@ app.post(
       }
 
       const user =
-        db.exec(
+        getOne(
           `
             SELECT *
             FROM users
@@ -1476,35 +1288,17 @@ app.post(
           [req.user.id]
         );
 
-      if (
-        !user.length ||
-        !user[0].values.length
-      ) {
+      if (!user) {
         return res.status(404).json({
           error:
             "Usuário não encontrado."
         });
       }
 
-      const columns =
-        user[0].columns;
-
-      const values =
-        user[0].values[0];
-
-      const userData = {};
-
-      columns.forEach(
-        (column, index) => {
-          userData[column] =
-            values[index];
-        }
-      );
-
       const valid =
         await bcrypt.compare(
           currentPassword,
-          userData.password_hash
+          user.password_hash
         );
 
       if (!valid) {
@@ -1565,7 +1359,7 @@ app.post(
 );
 
 /* =========================================================
-   API — PERFIL
+   PERFIL
 ========================================================= */
 
 app.get(
@@ -1653,7 +1447,7 @@ app.put(
 );
 
 /* =========================================================
-   API — MEMBROS
+   MEMBROS
 ========================================================= */
 
 app.get(
@@ -1694,10 +1488,10 @@ app.get(
 );
 
 /* =========================================================
-   API — JOGADORES
+   JOGADORES
 ========================================================= */
 
-/* LISTAR JOGADORES */
+/* LISTAR */
 
 app.get(
   "/api/players",
@@ -1738,22 +1532,20 @@ app.get(
 
       res.json({
         players:
-          players.map(
-            (player) => ({
-              ...player,
+          players.map((player) => ({
+            ...player,
 
-              secondary_positions:
-                JSON.parse(
-                  player.secondary_positions ||
-                    "[]"
-                ),
+            secondary_positions:
+              JSON.parse(
+                player.secondary_positions ||
+                  "[]"
+              ),
 
-              is_captain:
-                Boolean(
-                  player.is_captain
-                )
-            })
-          )
+            is_captain:
+              Boolean(
+                player.is_captain
+              )
+          }))
       });
     } catch (error) {
       console.error(
@@ -1769,7 +1561,7 @@ app.get(
   }
 );
 
-/* BUSCAR UM JOGADOR */
+/* BUSCAR */
 
 app.get(
   "/api/players/:id",
@@ -1777,7 +1569,9 @@ app.get(
   (req, res) => {
     try {
       const id =
-        Number(req.params.id);
+        Number(
+          req.params.id
+        );
 
       const player =
         getOne(
@@ -1897,22 +1691,17 @@ app.post(
       saveDb();
 
       const created =
-        getOne(
-          `
-            SELECT
-              last_insert_rowid()
-              AS id
-          `
-        );
+        getOne(`
+          SELECT
+            last_insert_rowid() AS id
+        `);
 
       res.status(201).json({
         message:
           "Membro transformado em jogador.",
 
         player_id:
-          Number(
-            created.id
-          )
+          Number(created.id)
       });
     } catch (error) {
       console.error(
@@ -2007,9 +1796,7 @@ app.post(
       if (
         number !== null &&
         (
-          !Number.isInteger(
-            number
-          ) ||
+          !Number.isInteger(number) ||
           number < 0 ||
           number > 99
         )
@@ -2020,9 +1807,7 @@ app.post(
         });
       }
 
-      if (
-        number !== null
-      ) {
+      if (number !== null) {
         const usedNumber =
           getOne(
             `
@@ -2041,9 +1826,7 @@ app.post(
         }
       }
 
-      if (
-        userId !== null
-      ) {
+      if (userId !== null) {
         const member =
           getOne(
             `
@@ -2231,9 +2014,7 @@ app.put(
       if (
         number !== null &&
         (
-          !Number.isInteger(
-            number
-          ) ||
+          !Number.isInteger(number) ||
           number < 0 ||
           number > 99
         )
@@ -2244,9 +2025,7 @@ app.put(
         });
       }
 
-      if (
-        number !== null
-      ) {
+      if (number !== null) {
         const numberUsed =
           getOne(
             `
@@ -2373,7 +2152,7 @@ app.delete(
 );
 
 /* =========================================================
-   API — CAPITÃO
+   CAPITÃO
 ========================================================= */
 
 app.put(
@@ -2403,17 +2182,11 @@ app.put(
         });
       }
 
-      /*
-       * Remove o capitão atual.
-       */
       db.run(`
         UPDATE players
         SET is_captain = 0
       `);
 
-      /*
-       * Define o novo capitão.
-       */
       db.run(
         `
           UPDATE players
@@ -2444,8 +2217,6 @@ app.put(
     }
   }
 );
-
-/* REMOVER CAPITÃO */
 
 app.delete(
   "/api/players/captain",
@@ -2478,7 +2249,7 @@ app.delete(
 );
 
 /* =========================================================
-   API — BATEDORES DE FALTA E PÊNALTI
+   BATEDORES
 ========================================================= */
 
 app.put(
@@ -2590,8 +2361,6 @@ app.put(
   }
 );
 
-/* LISTAR BATEDORES */
-
 app.get(
   "/api/player-roles",
   requireAuth,
@@ -2608,9 +2377,12 @@ app.get(
               p.name,
               p.number,
               p.primary_position
+
             FROM player_roles pr
+
             JOIN players p
               ON p.id = pr.player_id
+
             ORDER BY
               pr.role,
               pr.priority
@@ -2635,39 +2407,39 @@ app.get(
 );
 
 /* =========================================================
-   API — ENQUETES
+   ENQUETES
 ========================================================= */
 
 app.get(
   "/api/polls",
   requireAuth,
   (req, res) => {
-    const polls =
-      getRows(
-        `
-          SELECT
-            p.id,
-            p.question,
-            p.options_json,
-            p.multiple_choice,
-            p.closes_at,
-            p.created_at,
-            p.created_by,
-            u.name AS creator_name
+    try {
+      const polls =
+        getRows(
+          `
+            SELECT
+              p.id,
+              p.question,
+              p.options_json,
+              p.multiple_choice,
+              p.closes_at,
+              p.created_at,
+              p.created_by,
+              u.name AS creator_name
 
-          FROM polls p
+            FROM polls p
 
-          LEFT JOIN users u
-            ON u.id = p.created_by
+            LEFT JOIN users u
+              ON u.id = p.created_by
 
-          ORDER BY
-            p.created_at DESC
-        `
-      );
+            ORDER BY
+              p.created_at DESC
+          `
+        );
 
-    const result =
-      polls.map(
-        (poll) => {
+      const result =
+        polls.map((poll) => {
           let options = [];
 
           try {
@@ -2685,8 +2457,11 @@ app.get(
                 SELECT
                   option_index,
                   COUNT(*) AS count
+
                 FROM votes
+
                 WHERE poll_id = ?
+
                 GROUP BY option_index
               `,
               [poll.id]
@@ -2695,8 +2470,11 @@ app.get(
           const myVotes =
             getRows(
               `
-                SELECT option_index
+                SELECT
+                  option_index
+
                 FROM votes
+
                 WHERE poll_id = ?
                 AND user_id = ?
               `,
@@ -2713,10 +2491,7 @@ app.get(
 
           const totalVotes =
             votes.reduce(
-              (
-                sum,
-                vote
-              ) =>
+              (sum, vote) =>
                 sum +
                 Number(
                   vote.count
@@ -2724,8 +2499,7 @@ app.get(
               0
             );
 
-          const voteCounts =
-            {};
+          const voteCounts = {};
 
           votes.forEach(
             (vote) => {
@@ -2767,12 +2541,22 @@ app.get(
               ).getTime() <=
                 Date.now()
           };
-        }
+        });
+
+      res.json({
+        polls: result
+      });
+    } catch (error) {
+      console.error(
+        "Erro ao carregar enquetes:",
+        error
       );
 
-    res.json({
-      polls: result
-    });
+      res.status(500).json({
+        error:
+          "Não foi possível carregar as enquetes."
+      });
+    }
   }
 );
 
@@ -2819,9 +2603,7 @@ app.post(
         });
       }
 
-      if (
-        options.length < 2
-      ) {
+      if (options.length < 2) {
         return res.status(400).json({
           error:
             "A enquete precisa ter pelo menos duas opções."
@@ -2842,12 +2624,8 @@ app.post(
         `,
         [
           question,
-          JSON.stringify(
-            options
-          ),
-          multipleChoice
-            ? 1
-            : 0,
+          JSON.stringify(options),
+          multipleChoice ? 1 : 0,
           closesAt,
           req.user.id
         ]
@@ -2887,14 +2665,10 @@ app.post(
         Array.isArray(
           req.body.options
         )
-          ? req.body.options.map(
-              Number
-            )
+          ? req.body.options.map(Number)
           : [];
 
-      if (
-        !selectedOptions.length
-      ) {
+      if (!selectedOptions.length) {
         return res.status(400).json({
           error:
             "Selecione pelo menos uma opção."
@@ -2939,9 +2713,7 @@ app.post(
       const validOptions =
         selectedOptions.every(
           (index) =>
-            Number.isInteger(
-              index
-            ) &&
+            Number.isInteger(index) &&
             index >= 0 &&
             index < options.length
         );
@@ -2955,8 +2727,7 @@ app.post(
 
       if (
         !poll.multiple_choice &&
-        selectedOptions.length !==
-          1
+        selectedOptions.length !== 1
       ) {
         return res.status(400).json({
           error:
@@ -3084,7 +2855,7 @@ app.delete(
 );
 
 /* =========================================================
-   API — JOGOS
+   JOGOS
 ========================================================= */
 
 app.get(
@@ -3096,8 +2867,7 @@ app.get(
         `
           SELECT *
           FROM matches
-          ORDER BY
-            match_date ASC
+          ORDER BY match_date ASC
         `
       );
 
@@ -3119,8 +2889,7 @@ app.post(
 
       const matchDate =
         String(
-          req.body.match_date ||
-            ""
+          req.body.match_date || ""
         ).trim();
 
       const location =
@@ -3228,7 +2997,7 @@ app.delete(
 );
 
 /* =========================================================
-   API — ESCALAÇÃO POR PARTIDA
+   ESCALAÇÃO POR JOGO
 ========================================================= */
 
 app.put(
@@ -3269,10 +3038,19 @@ app.put(
         });
       }
 
-      /*
-       * Limpa a escalação anterior
-       * daquele jogo.
-       */
+      const starters =
+        req.body.lineup.filter(
+          (item) =>
+            item.starter
+        );
+
+      if (starters.length > 5) {
+        return res.status(400).json({
+          error:
+            "Uma escalação de futsal pode ter no máximo 5 titulares."
+        });
+      }
+
       db.run(
         `
           DELETE FROM match_lineup
@@ -3280,24 +3058,6 @@ app.put(
         `,
         [matchId]
       );
-
-      const starters =
-        req.body.lineup.filter(
-          (item) =>
-            item.starter
-        );
-
-      /*
-       * Futsal possui cinco titulares.
-       */
-      if (
-        starters.length > 5
-      ) {
-        return res.status(400).json({
-          error:
-            "Uma escalação de futsal pode ter no máximo 5 titulares."
-        });
-      }
 
       for (
         const item of
@@ -3314,20 +3074,15 @@ app.put(
           ).trim();
 
         const starter =
-          item.starter
-            ? 1
-            : 0;
+          item.starter ? 1 : 0;
 
         const instructions =
           String(
-            item.instructions ||
-              ""
+            item.instructions || ""
           ).trim();
 
         if (
-          !Number.isInteger(
-            playerId
-          ) ||
+          !Number.isInteger(playerId) ||
           !position
         ) {
           continue;
@@ -3419,8 +3174,7 @@ app.get(
             FROM match_lineup ml
 
             JOIN players p
-              ON p.id =
-                ml.player_id
+              ON p.id = ml.player_id
 
             WHERE ml.match_id = ?
 
@@ -3450,7 +3204,7 @@ app.get(
 );
 
 /* =========================================================
-   API — AVISOS / NOTÍCIAS
+   AVISOS
 ========================================================= */
 
 app.get(
@@ -3471,8 +3225,7 @@ app.get(
           FROM announcements a
 
           LEFT JOIN users u
-            ON u.id =
-              a.created_by
+            ON u.id = a.created_by
 
           ORDER BY
             a.created_at DESC
@@ -3586,7 +3339,7 @@ app.delete(
 );
 
 /* =========================================================
-   API — ESCALAÇÃO ANTIGA
+   ESCALAÇÃO ANTIGA
 ========================================================= */
 
 app.get(
@@ -3601,8 +3354,7 @@ app.get(
 
           ORDER BY
             CASE
-              WHEN status =
-                'titular'
+              WHEN status = 'titular'
               THEN 0
               ELSE 1
             END,
@@ -3643,8 +3395,7 @@ app.put(
       ) {
         const playerName =
           String(
-            player.player_name ||
-              ""
+            player.player_name || ""
           ).trim();
 
         if (!playerName) {
@@ -3653,8 +3404,7 @@ app.put(
 
         const position =
           String(
-            player.position ||
-              ""
+            player.position || ""
           ).trim();
 
         const status =
@@ -3665,14 +3415,12 @@ app.put(
 
         const number =
           String(
-            player.number ||
-              ""
+            player.number || ""
           ).trim();
 
         const notes =
           String(
-            player.notes ||
-              ""
+            player.notes || ""
           ).trim();
 
         db.run(
@@ -3718,7 +3466,7 @@ app.put(
 );
 
 /* =========================================================
-   ARQUIVOS DO FRONTEND
+   FRONTEND
 ========================================================= */
 
 app.use(
@@ -3728,14 +3476,13 @@ app.use(
 );
 
 /*
- * Permite acessar páginas HTML
- * diretamente.
+ * IMPORTANTE:
+ * Express 5 pode apresentar erro com
+ * app.get("*").
  *
- * A API continua protegida
- * pelas rotas acima.
+ * Por isso usamos app.use().
  */
-app.get(
-  "*",
+app.use(
   (req, res, next) => {
     if (
       req.path.startsWith(
@@ -3755,7 +3502,7 @@ app.get(
 );
 
 /* =========================================================
-   TRATAMENTO DE ERROS
+   ERROS
 ========================================================= */
 
 app.use(
@@ -3778,7 +3525,7 @@ app.use(
 );
 
 /* =========================================================
-   INICIALIZAÇÃO
+   INICIAR
 ========================================================= */
 
 initDatabase()
@@ -3793,13 +3540,11 @@ initDatabase()
       }
     );
   })
-  .catch(
-    (error) => {
-      console.error(
-        "Erro ao iniciar banco de dados:",
-        error
-      );
+  .catch((error) => {
+    console.error(
+      "Erro ao iniciar banco de dados:",
+      error
+    );
 
-      process.exit(1);
-    }
-  );
+    process.exit(1);
+  });
