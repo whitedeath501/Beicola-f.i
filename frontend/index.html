@@ -1,455 +1,2057 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
-
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>Beiçola F.I. — Área Pessoal</title>
+    <title>Beiçola F.I.</title>
 
-  <link
-    rel="stylesheet"
-    href="/css/style.css"
-  >
+    <meta
+        name="description"
+        content="Área privada do time de futsal Beiçola F.I."
+    >
+
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-<header>
+    <!-- =====================================================
+         TELA DE AUTENTICAÇÃO
+    ====================================================== -->
 
-  <div>
-    <strong>BEIÇOLA F.I.</strong>
-    <span>Área pessoal do time</span>
-  </div>
+    <section id="authScreen" class="auth-screen">
 
-  <button
-    id="logout"
-    class="ghost hidden"
-  >
-    Sair
-  </button>
+        <div class="auth-container">
 
-</header>
+            <div class="brand auth-brand">
+                <div class="brand-logo">B</div>
 
-<main>
+                <div>
+                    <h1>Beiçola F.I.</h1>
+                    <p>Área do time</p>
+                </div>
+            </div>
 
-  <!-- LOGIN / CADASTRO -->
+            <!-- LOGIN -->
 
-  <section
-    id="auth"
-    class="card"
-  >
+            <div id="loginBox" class="auth-box">
 
-    <h1>Área do time</h1>
+                <h2>Entrar</h2>
 
-    <p>
-      Entre na sua conta ou crie seu acesso.
-    </p>
+                <p class="muted">
+                    Entre na sua conta para acessar a área do time.
+                </p>
 
-    <div class="tabs">
+                <form id="loginForm">
 
-      <button data-tab="login">
-        Entrar
-      </button>
+                    <label for="loginEmail">
+                        E-mail
+                    </label>
 
-      <button data-tab="register">
-        Cadastrar
-      </button>
+                    <input
+                        type="email"
+                        id="loginEmail"
+                        placeholder="seu@email.com"
+                        autocomplete="email"
+                        required
+                    >
 
-      <button data-tab="forgot">
-        Esqueci a senha
-      </button>
+                    <label for="loginPassword">
+                        Senha
+                    </label>
 
-    </div>
+                    <input
+                        type="password"
+                        id="loginPassword"
+                        placeholder="Sua senha"
+                        autocomplete="current-password"
+                        required
+                    >
 
-    <!-- LOGIN -->
+                    <button type="submit">
+                        Entrar
+                    </button>
 
-    <form id="login">
+                </form>
 
-      <input
-        name="email"
-        type="email"
-        placeholder="E-mail"
-        required
-      >
+                <div id="loginMessage" class="message"></div>
 
-      <input
-        name="password"
-        type="password"
-        placeholder="Senha"
-        required
-      >
+                <div class="auth-links">
 
-      <button>
-        Entrar
-      </button>
+                    <button
+                        type="button"
+                        class="link-button"
+                        id="showRegister"
+                    >
+                        Criar conta
+                    </button>
 
-    </form>
+                    <button
+                        type="button"
+                        class="link-button"
+                        id="showForgotPassword"
+                    >
+                        Esqueci minha senha
+                    </button>
 
-    <!-- CADASTRO -->
+                </div>
 
-    <form
-      id="register"
-      class="hidden"
-    >
+            </div>
 
-      <input
-        name="name"
-        placeholder="Nome"
-        required
-      >
+            <!-- CADASTRO -->
 
-      <input
-        name="email"
-        type="email"
-        placeholder="E-mail"
-        required
-      >
+            <div
+                id="registerBox"
+                class="auth-box hidden"
+            >
 
-      <input
-        name="password"
-        type="password"
-        placeholder="Senha (8+ caracteres)"
-        required
-      >
+                <h2>Criar conta</h2>
 
-      <button>
-        Criar conta
-      </button>
+                <p class="muted">
+                    Crie sua conta para participar da área privada do time.
+                </p>
 
-    </form>
+                <form id="registerForm">
 
-    <!-- RECUPERAÇÃO -->
+                    <label for="registerName">
+                        Nome
+                    </label>
 
-    <form
-      id="forgot"
-      class="hidden"
-    >
+                    <input
+                        type="text"
+                        id="registerName"
+                        placeholder="Seu nome"
+                        autocomplete="name"
+                        required
+                    >
 
-      <input
-        name="email"
-        type="email"
-        placeholder="E-mail"
-        required
-      >
+                    <label for="registerEmail">
+                        E-mail
+                    </label>
 
-      <button>
-        Enviar recuperação
-      </button>
+                    <input
+                        type="email"
+                        id="registerEmail"
+                        placeholder="seu@email.com"
+                        autocomplete="email"
+                        required
+                    >
 
-    </form>
+                    <label for="registerPassword">
+                        Senha
+                    </label>
 
-    <p id="authMsg"></p>
+                    <input
+                        type="password"
+                        id="registerPassword"
+                        placeholder="Mínimo de 8 caracteres"
+                        autocomplete="new-password"
+                        minlength="8"
+                        required
+                    >
 
-    <!-- PRIMEIRO ADMIN -->
+                    <label for="registerPasswordConfirm">
+                        Confirmar senha
+                    </label>
+
+                    <input
+                        type="password"
+                        id="registerPasswordConfirm"
+                        placeholder="Digite a senha novamente"
+                        autocomplete="new-password"
+                        minlength="8"
+                        required
+                    >
+
+                    <button type="submit">
+                        Criar conta
+                    </button>
+
+                </form>
+
+                <div id="registerMessage" class="message"></div>
+
+                <button
+                    type="button"
+                    class="link-button"
+                    id="backToLogin"
+                >
+                    Voltar para o login
+                </button>
+
+            </div>
+
+            <!-- ESQUECI A SENHA -->
+
+            <div
+                id="forgotBox"
+                class="auth-box hidden"
+            >
+
+                <h2>Recuperar senha</h2>
+
+                <p class="muted">
+                    Informe seu e-mail e enviaremos um link para redefinir sua senha.
+                </p>
+
+                <form id="forgotForm">
+
+                    <label for="forgotEmail">
+                        E-mail
+                    </label>
+
+                    <input
+                        type="email"
+                        id="forgotEmail"
+                        placeholder="seu@email.com"
+                        autocomplete="email"
+                        required
+                    >
+
+                    <button type="submit">
+                        Enviar link
+                    </button>
+
+                </form>
+
+                <div id="forgotMessage" class="message"></div>
+
+                <button
+                    type="button"
+                    class="link-button"
+                    id="forgotBackLogin"
+                >
+                    Voltar para o login
+                </button>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =====================================================
+         APLICAÇÃO
+    ====================================================== -->
 
     <div
-      id="setupAdmin"
-      class="hidden"
+        id="appScreen"
+        class="app-screen hidden"
     >
 
-      <hr>
+        <!-- HEADER -->
 
-      <h2>
-        Configuração inicial
-      </h2>
+        <header class="topbar">
 
-      <p class="muted">
-        Ainda não existe um administrador.
-        Se você é responsável pelo time,
-        pode criar o primeiro administrador
-        usando a chave secreta configurada
-        no servidor.
-      </p>
+            <div class="brand">
 
-      <form id="setupAdminForm">
+                <div class="brand-logo">
+                    B
+                </div>
 
-        <input
-          name="name"
-          placeholder="Nome do administrador"
-          required
-        >
+                <div>
+                    <strong>Beiçola F.I.</strong>
+                    <span>Área do time</span>
+                </div>
 
-        <input
-          name="email"
-          type="email"
-          placeholder="E-mail do administrador"
-          required
-        >
+            </div>
 
-        <input
-          name="password"
-          type="password"
-          placeholder="Senha do administrador (8+ caracteres)"
-          required
-        >
+            <div class="topbar-user">
 
-        <input
-          name="setupKey"
-          type="password"
-          placeholder="Chave secreta de configuração"
-          required
-        >
+                <div class="user-info">
 
-        <button>
-          Criar administrador
-        </button>
+                    <strong id="headerUserName">
+                        Usuário
+                    </strong>
 
-      </form>
+                    <span id="headerUserRole">
+                        Integrante
+                    </span>
 
-      <p
-        id="setupAdminMsg"
-      ></p>
+                </div>
 
-    </div>
+                <button
+                    type="button"
+                    class="ghost-button"
+                    id="logoutButton"
+                >
+                    Sair
+                </button>
 
-  </section>
+            </div>
 
-  <!-- APLICAÇÃO -->
+        </header>
 
-  <section
-    id="app"
-    class="hidden"
-  >
 
-    <div class="hero">
+        <!-- LAYOUT -->
 
-      <div>
+        <div class="layout">
 
-        <h1>
-          Olá,
-          <span id="userName"></span>
-          👋
-        </h1>
+            <!-- SIDEBAR -->
 
-        <p id="userRole"></p>
+            <aside class="sidebar">
 
-      </div>
+                <nav class="navigation">
 
-      <button id="refresh">
-        Atualizar
-      </button>
+                    <button
+                        class="nav-button active"
+                        data-section="dashboard"
+                    >
+                        <span>⌂</span>
+                        Início
+                    </button>
 
-    </div>
+                    <button
+                        class="nav-button"
+                        data-section="players"
+                    >
+                        <span>⚽</span>
+                        Jogadores
+                    </button>
 
-    <div class="grid">
+                    <button
+                        class="nav-button"
+                        data-section="lineup"
+                    >
+                        <span>▦</span>
+                        Escalação
+                    </button>
 
-      <!-- ENQUETES -->
+                    <button
+                        class="nav-button"
+                        data-section="polls"
+                    >
+                        <span>☑</span>
+                        Enquetes
+                    </button>
 
-      <article class="card">
+                    <button
+                        class="nav-button"
+                        data-section="matches"
+                    >
+                        <span>◷</span>
+                        Jogos
+                    </button>
 
-        <h2>Enquetes</h2>
+                    <button
+                        class="nav-button"
+                        data-section="announcements"
+                    >
+                        <span>!</span>
+                        Avisos
+                    </button>
 
-        <div id="polls"></div>
+                    <button
+                        class="nav-button"
+                        data-section="profile"
+                    >
+                        <span>●</span>
+                        Meu perfil
+                    </button>
 
-        <div
-          id="adminPoll"
-          class="hidden"
-        >
+                    <button
+                        class="nav-button admin-only"
+                        data-section="admin"
+                    >
+                        <span>⚙</span>
+                        Administração
+                    </button>
 
-          <h3>
-            Nova enquete
-          </h3>
+                </nav>
 
-          <form id="pollForm">
+            </aside>
 
-            <input
-              name="question"
-              placeholder="Pergunta"
-              required
-            >
 
-            <input
-              name="options"
-              placeholder="Opções separadas por vírgula"
-              required
-            >
+            <!-- CONTEÚDO -->
 
-            <label>
-              <input
-                name="multiple"
-                type="checkbox"
-              >
+            <main class="main-content">
 
-              Permitir várias opções
-            </label>
+                <!-- =================================================
+                     DASHBOARD
+                ================================================== -->
 
-            <button>
-              Criar enquete
-            </button>
+                <section
+                    id="section-dashboard"
+                    class="page-section active"
+                >
 
-          </form>
+                    <div class="page-heading">
+
+                        <div>
+                            <p class="eyebrow">
+                                BEIÇOLA F.I.
+                            </p>
+
+                            <h1>
+                                Bem-vindo, <span id="welcomeName">jogador</span>.
+                            </h1>
+
+                            <p class="muted">
+                                Aqui está o painel do time.
+                            </p>
+                        </div>
+
+                    </div>
+
+
+                    <div class="dashboard-grid">
+
+                        <article class="stat-card">
+
+                            <span class="stat-label">
+                                Jogadores
+                            </span>
+
+                            <strong
+                                id="dashboardPlayers"
+                                class="stat-value"
+                            >
+                                0
+                            </strong>
+
+                            <span class="stat-description">
+                                cadastrados no elenco
+                            </span>
+
+                        </article>
+
+
+                        <article class="stat-card">
+
+                            <span class="stat-label">
+                                Próximos jogos
+                            </span>
+
+                            <strong
+                                id="dashboardMatches"
+                                class="stat-value"
+                            >
+                                0
+                            </strong>
+
+                            <span class="stat-description">
+                                partidas agendadas
+                            </span>
+
+                        </article>
+
+
+                        <article class="stat-card">
+
+                            <span class="stat-label">
+                                Enquetes
+                            </span>
+
+                            <strong
+                                id="dashboardPolls"
+                                class="stat-value"
+                            >
+                                0
+                            </strong>
+
+                            <span class="stat-description">
+                                disponíveis
+                            </span>
+
+                        </article>
+
+                    </div>
+
+
+                    <div class="dashboard-columns">
+
+                        <article class="card">
+
+                            <div class="card-header">
+
+                                <div>
+                                    <p class="eyebrow">
+                                        PRÓXIMO JOGO
+                                    </p>
+
+                                    <h2>
+                                        Próxima partida
+                                    </h2>
+                                </div>
+
+                            </div>
+
+                            <div id="dashboardNextMatch">
+                                <div class="empty-state">
+                                    Nenhum jogo cadastrado.
+                                </div>
+                            </div>
+
+                        </article>
+
+
+                        <article class="card">
+
+                            <div class="card-header">
+
+                                <div>
+                                    <p class="eyebrow">
+                                        AVISOS
+                                    </p>
+
+                                    <h2>
+                                        Últimos avisos
+                                    </h2>
+                                </div>
+
+                            </div>
+
+                            <div id="dashboardAnnouncements">
+                                <div class="empty-state">
+                                    Nenhum aviso publicado.
+                                </div>
+                            </div>
+
+                        </article>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     JOGADORES
+                ================================================== -->
+
+                <section
+                    id="section-players"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                ELENCO
+                            </p>
+
+                            <h1>
+                                Jogadores
+                            </h1>
+
+                            <p class="muted">
+                                Gerencie o elenco, posições, camisa e funções.
+                            </p>
+
+                        </div>
+
+                        <button
+                            type="button"
+                            class="admin-only"
+                            id="newPlayerButton"
+                        >
+                            + Novo jogador
+                        </button>
+
+                    </div>
+
+
+                    <!-- PAINEL DE FUNÇÕES -->
+
+                    <div class="card">
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    FUNÇÕES
+                                </p>
+
+                                <h2>
+                                    Capitão e cobradores
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="roles-grid">
+
+                            <div class="role-card">
+
+                                <span class="role-title">
+                                    Capitão
+                                </span>
+
+                                <strong
+                                    id="captainName"
+                                >
+                                    Nenhum definido
+                                </strong>
+
+                                <button
+                                    type="button"
+                                    class="ghost-button admin-only"
+                                    id="removeCaptainButton"
+                                >
+                                    Remover capitão
+                                </button>
+
+                            </div>
+
+
+                            <div class="role-card">
+
+                                <span class="role-title">
+                                    Pênaltis
+                                </span>
+
+                                <div
+                                    id="penaltyPlayers"
+                                    class="role-list"
+                                >
+                                    Nenhum definido
+                                </div>
+
+                            </div>
+
+
+                            <div class="role-card">
+
+                                <span class="role-title">
+                                    Faltas
+                                </span>
+
+                                <div
+                                    id="freeKickPlayers"
+                                    class="role-list"
+                                >
+                                    Nenhum definido
+                                </div>
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="admin-role-editor admin-only">
+
+                            <div class="form-grid">
+
+                                <div>
+
+                                    <label for="penaltySelect">
+                                        Batedores de pênalti
+                                    </label>
+
+                                    <select
+                                        id="penaltySelect"
+                                        multiple
+                                    ></select>
+
+                                    <small>
+                                        A ordem selecionada será a ordem de cobrança.
+                                    </small>
+
+                                </div>
+
+
+                                <div>
+
+                                    <label for="freeKickSelect">
+                                        Batedores de falta
+                                    </label>
+
+                                    <select
+                                        id="freeKickSelect"
+                                        multiple
+                                    ></select>
+
+                                    <small>
+                                        A ordem selecionada será a ordem de cobrança.
+                                    </small>
+
+                                </div>
+
+                            </div>
+
+                            <button
+                                type="button"
+                                id="saveRolesButton"
+                            >
+                                Salvar cobradores
+                            </button>
+
+                            <div
+                                id="rolesMessage"
+                                class="message"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- LISTA -->
+
+                    <div
+                        id="playersList"
+                        class="players-grid"
+                    >
+
+                        <div class="loading-state">
+                            Carregando jogadores...
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     ESCALAÇÃO
+                ================================================== -->
+
+                <section
+                    id="section-lineup"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                ESCALAÇÃO
+                            </p>
+
+                            <h1>
+                                Time titular
+                            </h1>
+
+                            <p class="muted">
+                                Monte os cinco titulares e defina as instruções.
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="lineup-layout">
+
+                        <div class="card">
+
+                            <div class="card-header">
+
+                                <div>
+
+                                    <p class="eyebrow">
+                                        QUADRA
+                                    </p>
+
+                                    <h2>
+                                        Titulares
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="court">
+
+                                <div class="court-line center-line"></div>
+
+                                <div class="center-circle"></div>
+
+                                <div
+                                    class="court-player goalkeeper"
+                                    data-position="Goleiro"
+                                >
+                                    <span class="position-label">
+                                        Goleiro
+                                    </span>
+
+                                    <strong
+                                        data-player-position="Goleiro"
+                                    >
+                                        —
+                                    </strong>
+                                </div>
+
+
+                                <div
+                                    class="court-player defender"
+                                    data-position="Fixo"
+                                >
+                                    <span class="position-label">
+                                        Fixo
+                                    </span>
+
+                                    <strong
+                                        data-player-position="Fixo"
+                                    >
+                                        —
+                                    </strong>
+                                </div>
+
+
+                                <div
+                                    class="court-player right-wing"
+                                    data-position="Ala direita"
+                                >
+                                    <span class="position-label">
+                                        Ala direita
+                                    </span>
+
+                                    <strong
+                                        data-player-position="Ala direita"
+                                    >
+                                        —
+                                    </strong>
+                                </div>
+
+
+                                <div
+                                    class="court-player left-wing"
+                                    data-position="Ala esquerda"
+                                >
+                                    <span class="position-label">
+                                        Ala esquerda
+                                    </span>
+
+                                    <strong
+                                        data-player-position="Ala esquerda"
+                                    >
+                                        —
+                                    </strong>
+                                </div>
+
+
+                                <div
+                                    class="court-player pivot"
+                                    data-position="Pivô"
+                                >
+                                    <span class="position-label">
+                                        Pivô
+                                    </span>
+
+                                    <strong
+                                        data-player-position="Pivô"
+                                    >
+                                        —
+                                    </strong>
+                                </div>
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="card">
+
+                            <div class="card-header">
+
+                                <div>
+
+                                    <p class="eyebrow">
+                                        CONFIGURAÇÃO
+                                    </p>
+
+                                    <h2>
+                                        Montar escalação
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+
+                            <div
+                                id="lineupEditor"
+                                class="lineup-editor"
+                            >
+
+                                <div class="empty-state">
+                                    Carregando jogadores...
+                                </div>
+
+                            </div>
+
+
+                            <button
+                                type="button"
+                                class="admin-only"
+                                id="saveLineupButton"
+                            >
+                                Salvar escalação
+                            </button>
+
+                            <div
+                                id="lineupMessage"
+                                class="message"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- ESCALAÇÃO POR JOGO -->
+
+                    <div class="card">
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    PARTIDAS
+                                </p>
+
+                                <h2>
+                                    Escalação específica por jogo
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="form-grid">
+
+                            <div>
+
+                                <label for="lineupMatchSelect">
+                                    Jogo
+                                </label>
+
+                                <select
+                                    id="lineupMatchSelect"
+                                >
+                                    <option value="">
+                                        Selecione um jogo
+                                    </option>
+                                </select>
+
+                            </div>
+
+                        </div>
+
+
+                        <div
+                            id="matchLineupEditor"
+                            class="match-lineup-editor"
+                        >
+
+                            <div class="empty-state">
+                                Selecione um jogo para montar a escalação.
+                            </div>
+
+                        </div>
+
+
+                        <button
+                            type="button"
+                            class="admin-only"
+                            id="saveMatchLineupButton"
+                        >
+                            Salvar escalação do jogo
+                        </button>
+
+                        <div
+                            id="matchLineupMessage"
+                            class="message"
+                        ></div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     ENQUETES
+                ================================================== -->
+
+                <section
+                    id="section-polls"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                DECISÕES
+                            </p>
+
+                            <h1>
+                                Enquetes
+                            </h1>
+
+                            <p class="muted">
+                                Participe das decisões do time.
+                            </p>
+
+                        </div>
+
+                        <button
+                            type="button"
+                            class="admin-only"
+                            id="newPollButton"
+                        >
+                            + Nova enquete
+                        </button>
+
+                    </div>
+
+
+                    <div
+                        id="pollCreateBox"
+                        class="card hidden admin-only"
+                    >
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    ADMINISTRAÇÃO
+                                </p>
+
+                                <h2>
+                                    Criar enquete
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <form id="pollForm">
+
+                            <label for="pollQuestion">
+                                Pergunta
+                            </label>
+
+                            <input
+                                type="text"
+                                id="pollQuestion"
+                                placeholder="Ex.: Quem será o capitão?"
+                                required
+                            >
+
+
+                            <label>
+                                Opções
+                            </label>
+
+                            <div
+                                id="pollOptions"
+                                class="poll-options"
+                            >
+
+                                <input
+                                    type="text"
+                                    class="poll-option"
+                                    placeholder="Opção 1"
+                                    required
+                                >
+
+                                <input
+                                    type="text"
+                                    class="poll-option"
+                                    placeholder="Opção 2"
+                                    required
+                                >
+
+                            </div>
+
+
+                            <button
+                                type="button"
+                                class="ghost-button"
+                                id="addPollOptionButton"
+                            >
+                                + Adicionar opção
+                            </button>
+
+
+                            <div class="form-grid">
+
+                                <div>
+
+                                    <label for="pollCloseDate">
+                                        Data de encerramento
+                                    </label>
+
+                                    <input
+                                        type="datetime-local"
+                                        id="pollCloseDate"
+                                    >
+
+                                </div>
+
+
+                                <div class="checkbox-field">
+
+                                    <label>
+
+                                        <input
+                                            type="checkbox"
+                                            id="pollMultiple"
+                                        >
+
+                                        Permitir escolher mais de uma opção
+
+                                    </label>
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="form-actions">
+
+                                <button type="submit">
+                                    Criar enquete
+                                </button>
+
+                                <button
+                                    type="button"
+                                    class="ghost-button"
+                                    id="cancelPollButton"
+                                >
+                                    Cancelar
+                                </button>
+
+                            </div>
+
+                        </form>
+
+
+                        <div
+                            id="pollMessage"
+                            class="message"
+                        ></div>
+
+                    </div>
+
+
+                    <div
+                        id="pollsList"
+                        class="stack-list"
+                    >
+
+                        <div class="loading-state">
+                            Carregando enquetes...
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     JOGOS
+                ================================================== -->
+
+                <section
+                    id="section-matches"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                CALENDÁRIO
+                            </p>
+
+                            <h1>
+                                Jogos
+                            </h1>
+
+                            <p class="muted">
+                                Veja as próximas partidas e os resultados.
+                            </p>
+
+                        </div>
+
+                        <button
+                            type="button"
+                            class="admin-only"
+                            id="newMatchButton"
+                        >
+                            + Novo jogo
+                        </button>
+
+                    </div>
+
+
+                    <div
+                        id="matchCreateBox"
+                        class="card hidden admin-only"
+                    >
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    ADMINISTRAÇÃO
+                                </p>
+
+                                <h2>
+                                    Adicionar jogo
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <form id="matchForm">
+
+                            <div class="form-grid">
+
+                                <div>
+
+                                    <label for="matchOpponent">
+                                        Adversário
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        id="matchOpponent"
+                                        placeholder="Nome do adversário"
+                                        required
+                                    >
+
+                                </div>
+
+
+                                <div>
+
+                                    <label for="matchDate">
+                                        Data e horário
+                                    </label>
+
+                                    <input
+                                        type="datetime-local"
+                                        id="matchDate"
+                                        required
+                                    >
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="form-grid">
+
+                                <div>
+
+                                    <label for="matchLocation">
+                                        Local
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        id="matchLocation"
+                                        placeholder="Local da partida"
+                                    >
+
+                                </div>
+
+
+                                <div>
+
+                                    <label for="matchResult">
+                                        Resultado
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        id="matchResult"
+                                        placeholder="Ex.: 4 x 2"
+                                    >
+
+                                </div>
+
+                            </div>
+
+
+                            <label for="matchNotes">
+                                Observações
+                            </label>
+
+                            <textarea
+                                id="matchNotes"
+                                placeholder="Informações adicionais..."
+                            ></textarea>
+
+
+                            <div class="form-actions">
+
+                                <button type="submit">
+                                    Salvar jogo
+                                </button>
+
+                                <button
+                                    type="button"
+                                    class="ghost-button"
+                                    id="cancelMatchButton"
+                                >
+                                    Cancelar
+                                </button>
+
+                            </div>
+
+                        </form>
+
+
+                        <div
+                            id="matchMessage"
+                            class="message"
+                        ></div>
+
+                    </div>
+
+
+                    <div
+                        id="matchesList"
+                        class="matches-list"
+                    >
+
+                        <div class="loading-state">
+                            Carregando jogos...
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     AVISOS
+                ================================================== -->
+
+                <section
+                    id="section-announcements"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                COMUNICAÇÃO
+                            </p>
+
+                            <h1>
+                                Avisos
+                            </h1>
+
+                            <p class="muted">
+                                Informações importantes do time.
+                            </p>
+
+                        </div>
+
+                        <button
+                            type="button"
+                            class="admin-only"
+                            id="newAnnouncementButton"
+                        >
+                            + Novo aviso
+                        </button>
+
+                    </div>
+
+
+                    <div
+                        id="announcementCreateBox"
+                        class="card hidden admin-only"
+                    >
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    ADMINISTRAÇÃO
+                                </p>
+
+                                <h2>
+                                    Publicar aviso
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <form id="announcementForm">
+
+                            <label for="announcementTitle">
+                                Título
+                            </label>
+
+                            <input
+                                type="text"
+                                id="announcementTitle"
+                                placeholder="Título do aviso"
+                                required
+                            >
+
+
+                            <label for="announcementContent">
+                                Conteúdo
+                            </label>
+
+                            <textarea
+                                id="announcementContent"
+                                placeholder="Escreva o aviso..."
+                                required
+                            ></textarea>
+
+
+                            <div class="form-actions">
+
+                                <button type="submit">
+                                    Publicar
+                                </button>
+
+                                <button
+                                    type="button"
+                                    class="ghost-button"
+                                    id="cancelAnnouncementButton"
+                                >
+                                    Cancelar
+                                </button>
+
+                            </div>
+
+                        </form>
+
+
+                        <div
+                            id="announcementMessage"
+                            class="message"
+                        ></div>
+
+                    </div>
+
+
+                    <div
+                        id="announcementsList"
+                        class="stack-list"
+                    >
+
+                        <div class="loading-state">
+                            Carregando avisos...
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     PERFIL
+                ================================================== -->
+
+                <section
+                    id="section-profile"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                CONTA
+                            </p>
+
+                            <h1>
+                                Meu perfil
+                            </h1>
+
+                            <p class="muted">
+                                Gerencie suas informações pessoais.
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="profile-grid">
+
+                        <div class="card">
+
+                            <div class="card-header">
+
+                                <div>
+
+                                    <p class="eyebrow">
+                                        PERFIL
+                                    </p>
+
+                                    <h2>
+                                        Informações
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+
+                            <form id="profileForm">
+
+                                <label for="profileName">
+                                    Nome
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="profileName"
+                                    required
+                                >
+
+
+                                <label for="profileEmail">
+                                    E-mail
+                                </label>
+
+                                <input
+                                    type="email"
+                                    id="profileEmail"
+                                    disabled
+                                >
+
+
+                                <label for="profileRole">
+                                    Tipo de conta
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="profileRole"
+                                    disabled
+                                >
+
+
+                                <button type="submit">
+                                    Salvar alterações
+                                </button>
+
+                            </form>
+
+
+                            <div
+                                id="profileMessage"
+                                class="message"
+                            ></div>
+
+                        </div>
+
+
+                        <div class="card">
+
+                            <div class="card-header">
+
+                                <div>
+
+                                    <p class="eyebrow">
+                                        SEGURANÇA
+                                    </p>
+
+                                    <h2>
+                                        Alterar senha
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+
+                            <form id="passwordForm">
+
+                                <label for="currentPassword">
+                                    Senha atual
+                                </label>
+
+                                <input
+                                    type="password"
+                                    id="currentPassword"
+                                    autocomplete="current-password"
+                                    required
+                                >
+
+
+                                <label for="newPassword">
+                                    Nova senha
+                                </label>
+
+                                <input
+                                    type="password"
+                                    id="newPassword"
+                                    autocomplete="new-password"
+                                    minlength="8"
+                                    required
+                                >
+
+
+                                <label for="confirmNewPassword">
+                                    Confirmar nova senha
+                                </label>
+
+                                <input
+                                    type="password"
+                                    id="confirmNewPassword"
+                                    autocomplete="new-password"
+                                    minlength="8"
+                                    required
+                                >
+
+
+                                <button type="submit">
+                                    Alterar senha
+                                </button>
+
+                            </form>
+
+
+                            <div
+                                id="passwordMessage"
+                                class="message"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- =================================================
+                     ADMINISTRAÇÃO
+                ================================================== -->
+
+                <section
+                    id="section-admin"
+                    class="page-section"
+                >
+
+                    <div class="page-heading">
+
+                        <div>
+
+                            <p class="eyebrow">
+                                CONTROLE
+                            </p>
+
+                            <h1>
+                                Administração
+                            </h1>
+
+                            <p class="muted">
+                                Gerencie membros, jogadores e informações do time.
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- MEMBROS -->
+
+                    <div class="card">
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    MEMBROS
+                                </p>
+
+                                <h2>
+                                    Integrantes cadastrados
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <div
+                            id="membersList"
+                            class="stack-list"
+                        >
+
+                            <div class="loading-state">
+                                Carregando membros...
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- GERENCIAMENTO DE JOGADOR -->
+
+                    <div
+                        id="playerModal"
+                        class="modal hidden"
+                    >
+
+                        <div class="modal-content">
+
+                            <div class="modal-header">
+
+                                <div>
+
+                                    <p class="eyebrow">
+                                        JOGADOR
+                                    </p>
+
+                                    <h2 id="playerModalTitle">
+                                        Novo jogador
+                                    </h2>
+
+                                </div>
+
+                                <button
+                                    type="button"
+                                    class="modal-close"
+                                    id="closePlayerModal"
+                                >
+                                    ×
+                                </button>
+
+                            </div>
+
+
+                            <form id="playerForm">
+
+                                <input
+                                    type="hidden"
+                                    id="playerId"
+                                >
+
+
+                                <label for="playerName">
+                                    Nome
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="playerName"
+                                    placeholder="Nome do jogador"
+                                    required
+                                >
+
+
+                                <div class="form-grid">
+
+                                    <div>
+
+                                        <label for="playerNumber">
+                                            Número da camisa
+                                        </label>
+
+                                        <input
+                                            type="number"
+                                            id="playerNumber"
+                                            min="0"
+                                            max="99"
+                                            placeholder="Ex.: 10"
+                                        >
+
+                                    </div>
+
+
+                                    <div>
+
+                                        <label for="playerStatus">
+                                            Status
+                                        </label>
+
+                                        <select
+                                            id="playerStatus"
+                                        >
+
+                                            <option value="disponivel">
+                                                Disponível
+                                            </option>
+
+                                            <option value="duvida">
+                                                Dúvida
+                                            </option>
+
+                                            <option value="lesionado">
+                                                Lesionado
+                                            </option>
+
+                                            <option value="suspenso">
+                                                Suspenso
+                                            </option>
+
+                                            <option value="inativo">
+                                                Inativo
+                                            </option>
+
+                                        </select>
+
+                                    </div>
+
+                                </div>
+
+
+                                <label for="playerPrimaryPosition">
+                                    Posição principal
+                                </label>
+
+                                <select
+                                    id="playerPrimaryPosition"
+                                    required
+                                >
+
+                                    <option value="">
+                                        Selecione
+                                    </option>
+
+                                    <option value="Goleiro">
+                                        Goleiro
+                                    </option>
+
+                                    <option value="Fixo">
+                                        Fixo
+                                    </option>
+
+                                    <option value="Ala direita">
+                                        Ala direita
+                                    </option>
+
+                                    <option value="Ala esquerda">
+                                        Ala esquerda
+                                    </option>
+
+                                    <option value="Pivô">
+                                        Pivô
+                                    </option>
+
+                                </select>
+
+
+                                <label for="playerSecondaryPositions">
+                                    Posições secundárias
+                                </label>
+
+                                <select
+                                    id="playerSecondaryPositions"
+                                    multiple
+                                >
+
+                                    <option value="Goleiro">
+                                        Goleiro
+                                    </option>
+
+                                    <option value="Fixo">
+                                        Fixo
+                                    </option>
+
+                                    <option value="Ala direita">
+                                        Ala direita
+                                    </option>
+
+                                    <option value="Ala esquerda">
+                                        Ala esquerda
+                                    </option>
+
+                                    <option value="Pivô">
+                                        Pivô
+                                    </option>
+
+                                </select>
+
+
+                                <label for="playerInstructions">
+                                    Instruções individuais
+                                </label>
+
+                                <textarea
+                                    id="playerInstructions"
+                                    placeholder="Ex.: marcar mais avançado, apoiar ataque, ficar responsável pelas bolas paradas..."
+                                ></textarea>
+
+
+                                <label for="playerUser">
+                                    Vincular a um membro
+                                </label>
+
+                                <select
+                                    id="playerUser"
+                                >
+
+                                    <option value="">
+                                        Nenhum membro vinculado
+                                    </option>
+
+                                </select>
+
+
+                                <div
+                                    id="playerFormMessage"
+                                    class="message"
+                                ></div>
+
+
+                                <div class="form-actions">
+
+                                    <button type="submit">
+                                        Salvar jogador
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        class="ghost-button"
+                                        id="cancelPlayerButton"
+                                    >
+                                        Cancelar
+                                    </button>
+
+                                </div>
+
+                            </form>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- CONFIGURAÇÃO INICIAL DO ADMIN -->
+
+                    <div
+                        id="setupAdminBox"
+                        class="card hidden"
+                    >
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <p class="eyebrow">
+                                    CONFIGURAÇÃO
+                                </p>
+
+                                <h2>
+                                    Primeiro administrador
+                                </h2>
+
+                            </div>
+
+                        </div>
+
+
+                        <p class="muted">
+                            Esta área só é necessária caso ainda não exista um administrador.
+                        </p>
+
+
+                        <form id="setupAdminForm">
+
+                            <label for="setupAdminKey">
+                                Chave de configuração
+                            </label>
+
+                            <input
+                                type="password"
+                                id="setupAdminKey"
+                                required
+                            >
+
+
+                            <label for="setupAdminName">
+                                Nome
+                            </label>
+
+                            <input
+                                type="text"
+                                id="setupAdminName"
+                                required
+                            >
+
+
+                            <label for="setupAdminEmail">
+                                E-mail
+                            </label>
+
+                            <input
+                                type="email"
+                                id="setupAdminEmail"
+                                required
+                            >
+
+
+                            <label for="setupAdminPassword">
+                                Senha
+                            </label>
+
+                            <input
+                                type="password"
+                                id="setupAdminPassword"
+                                minlength="8"
+                                required
+                            >
+
+
+                            <button type="submit">
+                                Criar administrador
+                            </button>
+
+                        </form>
+
+
+                        <div
+                            id="setupAdminMessage"
+                            class="message"
+                        ></div>
+
+                    </div>
+
+                </section>
+
+            </main>
 
         </div>
 
-      </article>
-
-      <!-- PARTIDAS -->
-
-      <article class="card">
-
-        <h2>Partidas</h2>
-
-        <div id="matches"></div>
-
-        <div
-          id="adminMatch"
-          class="hidden"
-        >
-
-          <h3>
-            Adicionar partida
-          </h3>
-
-          <form id="matchForm">
-
-            <input
-              name="opponent"
-              placeholder="Adversário"
-              required
-            >
-
-            <input
-              name="date"
-              type="date"
-              required
-            >
-
-            <input
-              name="time"
-              type="time"
-            >
-
-            <input
-              name="location"
-              placeholder="Local"
-            >
-
-            <button>
-              Adicionar
-            </button>
-
-          </form>
-
-        </div>
-
-      </article>
-
-      <!-- ESCALAÇÃO -->
-
-      <article class="card">
-
-        <h2>Escalação</h2>
-
-        <div id="lineup"></div>
-
-      </article>
-
-      <!-- AVISOS -->
-
-      <article class="card">
-
-        <h2>Avisos</h2>
-
-        <div id="announcements"></div>
-
-        <div
-          id="adminNotice"
-          class="hidden"
-        >
-
-          <h3>
-            Novo aviso
-          </h3>
-
-          <form id="noticeForm">
-
-            <input
-              name="title"
-              placeholder="Título"
-              required
-            >
-
-            <textarea
-              name="body"
-              placeholder="Aviso"
-              required
-            ></textarea>
-
-            <button>
-              Publicar
-            </button>
-
-          </form>
-
-        </div>
-
-      </article>
-
-      <!-- MEMBROS -->
-
-      <article class="card">
-
-        <h2>Membros</h2>
-
-        <div id="members"></div>
-
-      </article>
-
-      <!-- CONTA -->
-
-      <article class="card">
-
-        <h2>Minha conta</h2>
-
-        <form id="profileForm">
-
-          <input
-            name="name"
-            placeholder="Nome"
-            required
-          >
-
-          <button>
-            Salvar nome
-          </button>
-
-        </form>
-
-        <form id="passwordForm">
-
-          <input
-            name="currentPassword"
-            type="password"
-            placeholder="Senha atual"
-            required
-          >
-
-          <input
-            name="newPassword"
-            type="password"
-            placeholder="Nova senha"
-            required
-          >
-
-          <button>
-            Alterar senha
-          </button>
-
-        </form>
-
-        <p id="profileMsg"></p>
-
-      </article>
-
     </div>
 
-  </section>
 
-</main>
+    <!-- =====================================================
+         TOAST
+    ====================================================== -->
 
-<script src="/js/app.js"></script>
+    <div
+        id="toast"
+        class="toast hidden"
+    ></div>
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+    ====================================================== -->
+
+    <script src="script.js"></script>
 
 </body>
-
 </html>
