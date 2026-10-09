@@ -4,8 +4,13 @@
   "private": true,
   "description": "Area pessoal do time de futsal Beicola F.I.",
   "main": "server.js",
-  "scripts": {"start":"node server.js","make-admin":"node make-admin.js"},
-  "engines": {"node": ">=22.5.0"},
+  "scripts": {
+    "start": "node server.js",
+    "make-admin": "node make-admin.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
