@@ -18,8 +18,6 @@
 </head>
 
 <body>
-
-```
 <!-- =====================================================
      APLICAÇÃO
 ====================================================== -->
@@ -49,7 +47,7 @@
 
         <nav class="sidebar-nav">
 
-            <button
+            <button type="button"
                 class="nav-button active"
                 data-page="inicio"
             >
@@ -58,7 +56,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="elenco"
             >
@@ -67,7 +65,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="escalacao"
             >
@@ -76,7 +74,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="partidas"
             >
@@ -85,7 +83,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="enquetes"
             >
@@ -94,7 +92,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="avisos"
             >
@@ -103,7 +101,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="mensagens"
             >
@@ -117,7 +115,7 @@
 
             <!-- SOMENTE ADMIN -->
 
-            <button
+            <button type="button"
                 class="nav-button admin-only"
                 data-page="admin"
             >
@@ -126,7 +124,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button admin-only"
                 data-page="gerenciar-jogadores"
             >
@@ -135,7 +133,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button admin-only"
                 data-page="montar-escalacao"
             >
@@ -148,7 +146,7 @@
 
         <div class="sidebar-bottom">
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="perfil"
             >
@@ -157,7 +155,7 @@
             </button>
 
 
-            <button
+            <button type="button"
                 id="logoutButton"
                 class="nav-button logout-button"
             >
@@ -183,7 +181,7 @@
         <header class="topbar">
 
             <div class="mobile-menu">
-                <button id="mobileMenuButton">
+                <button type="button" id="mobileMenuButton" aria-label="Abrir menu">
                     ☰
                 </button>
             </div>
@@ -339,7 +337,7 @@
                             </h2>
                         </div>
 
-                        <button
+                        <button type="button"
                             class="outline-button"
                             data-page="partidas"
                         >
@@ -376,7 +374,7 @@
                             </h2>
                         </div>
 
-                        <button
+                        <button type="button"
                             class="outline-button"
                             data-page="escalacao"
                         >
@@ -417,7 +415,7 @@
 
                         </div>
 
-                        <button
+                        <button type="button"
                             class="outline-button"
                             data-page="avisos"
                         >
@@ -842,7 +840,7 @@
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="pollQuestion">
                                 Pergunta
                             </label>
 
@@ -858,7 +856,7 @@
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="pollOptions">
                                 Opções
                             </label>
 
@@ -875,7 +873,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="pollCloseDate">
                                     Data de encerramento
                                 </label>
 
@@ -982,7 +980,7 @@
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="announcementTitle">
                                 Título
                             </label>
 
@@ -997,7 +995,7 @@
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="announcementContent">
                                 Mensagem
                             </label>
 
@@ -1181,7 +1179,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="profileNameInput">
                                     Nome
                                 </label>
 
@@ -1196,7 +1194,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="profileEmailInput">
                                     E-mail
                                 </label>
 
@@ -1244,7 +1242,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="currentPassword">
                                     Senha atual
                                 </label>
 
@@ -1259,7 +1257,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="newPassword">
                                     Nova senha
                                 </label>
 
@@ -1275,7 +1273,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="confirmNewPassword">
                                     Confirmar nova senha
                                 </label>
 
@@ -1348,7 +1346,7 @@
                             números, status e instruções.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="gerenciar-jogadores"
                         >
@@ -1373,7 +1371,7 @@
                             formação personalizada.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="montar-escalacao"
                         >
@@ -1397,7 +1395,7 @@
                             Crie votações para os integrantes do time.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="enquetes"
                         >
@@ -1421,7 +1419,7 @@
                             Veja e responda às mensagens dos integrantes.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="mensagens"
                         >
@@ -1464,7 +1462,7 @@
                     </div>
 
 
-                    <button
+                    <button type="button"
                         id="addPlayerButton"
                         class="primary-button"
                     >
@@ -1580,7 +1578,7 @@
                     </div>
 
 
-                    <button
+                    <button type="button"
                         id="saveLineupButton"
                         class="primary-button"
                     >
@@ -1613,35 +1611,35 @@
 
                     <div class="formation-controls">
 
-                        <button
+                        <button type="button"
                             class="formation-button active"
                             data-formation="2-2"
                         >
                             2-2
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="1-2-1"
                         >
                             1-2-1
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="3-1"
                         >
                             3-1
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="1-3"
                         >
                             1-3
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="personalizada"
                         >
@@ -1660,7 +1658,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="formationDefenders">
                                     Defensores
                                 </label>
 
@@ -1677,7 +1675,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="formationWings">
                                     Alas
                                 </label>
 
@@ -1694,7 +1692,7 @@
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="formationPivots">
                                     Pivôs
                                 </label>
 
@@ -1996,9 +1994,10 @@
             </div>
 
 
-            <button
+            <button type="button"
                 class="modal-close"
                 id="closePlayerModal"
+                aria-label="Fechar janela de jogador"
             >
                 ×
             </button>
@@ -2018,7 +2017,7 @@
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerName">
                         Nome
                     </label>
 
@@ -2033,7 +2032,7 @@
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerNumber">
                         Número da camisa
                     </label>
 
@@ -2053,7 +2052,7 @@
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerPrimaryPosition">
                         Posição principal
                     </label>
 
@@ -2093,7 +2092,7 @@
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerSecondaryPosition">
                         Posição secundária
                     </label>
 
@@ -2134,7 +2133,7 @@
 
             <div class="form-group">
 
-                <label>
+                <label for="playerStatus">
                     Status
                 </label>
 
@@ -2167,7 +2166,7 @@
 
             <div class="form-group">
 
-                <label>
+                <label for="playerPhoto">
                     Foto do jogador
                 </label>
 
@@ -2186,7 +2185,7 @@
 
             <div class="form-group">
 
-                <label>
+                <label for="playerInstructions">
                     Instruções individuais
                 </label>
 
