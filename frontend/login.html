@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>Entrar — Beiçola F.I.</title>
+  <style>
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><div class="mark">B</div><div><strong>Beiçola F.I.</strong><span>Área exclusiva do time</span></div></div>
+    <section class="card">
+      <div class="eyebrow">Acesso do time</div>
+      <h1 id="heading">Bem-vindo de volta.</h1>
+      <p class="sub" id="subheading">Entre com sua conta para abrir o painel.</p>
+      <div class="tabs" role="tablist" aria-label="Opções de acesso">
+        <button class="tab active" type="button" data-panel="loginForm">Entrar</button>
+        <button class="tab" type="button" data-panel="registerForm">Criar conta</button>
+      </div>
+      <form id="loginForm" class="panel">
+        <div class="field"><label for="loginEmail">E-mail</label><input id="loginEmail" name="email" type="email" autocomplete="username" required></div>
+        <div class="field"><label for="loginPassword">Senha</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" required></div>
+        <button class="primary" type="submit">Entrar no painel</button>
+        <div class="links"><button class="link" type="button" id="showForgot">Esqueci minha senha</button><span></span></div>
+        <p class="message" id="loginMessage" role="status" aria-live="polite"></p>
+      </form>
+      <form id="registerForm" class="panel" hidden>
+        <div class="field"><label for="registerName">Nome</label><input id="registerName" name="name" autocomplete="name" maxlength="120" required></div>
+        <div class="field"><label for="registerEmail">E-mail</label><input id="registerEmail" name="email" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="registerPassword">Senha (mínimo de 8 caracteres)</label><input id="registerPassword" name="password" type="password" minlength="8" autocomplete="new-password" required></div>
+        <div class="field"><label for="registerPasswordConfirm">Confirmar senha</label><input id="registerPasswordConfirm" name="passwordConfirm" type="password" minlength="8" autocomplete="new-password" required></div>
+        <button class="primary" type="submit">Criar conta</button>
+        <p class="message" id="registerMessage" role="status" aria-live="polite"></p>
+      </form>
+      <form id="forgotForm" class="panel" hidden>
+        <p class="sub">Informe o e-mail da conta. Se ele estiver cadastrado, as instruções serão enviadas.</p>
+        <div class="field"><label for="forgotEmail">E-mail</label><input id="forgotEmail" type="email" autocomplete="email" required></div>
+        <button class="primary" type="submit">Enviar instruções</button>
+        <div class="links"><button class="link" type="button" id="backToLogin">Voltar ao login</button></div>
+        <p class="message" id="forgotMessage" role="status" aria-live="polite"></p>
+      </form>
+      <form id="resetForm" class="panel" hidden>
+        <p class="sub">Crie uma nova senha para sua conta. O link de recuperação expira após 30 minutos.</p>
+        <div class="field"><label for="resetPassword">Nova senha (mínimo de 8 caracteres)</label><input id="resetPassword" type="password" minlength="8" autocomplete="new-password" required></div>
+        <div class="field"><label for="resetPasswordConfirm">Confirmar nova senha</label><input id="resetPasswordConfirm" type="password" minlength="8" autocomplete="new-password" required></div>
+        <button class="primary" type="submit">Salvar nova senha</button>
+        <p class="message" id="resetMessage" role="status" aria-live="polite"></p>
+      </form>
+      <form id="setupAdminForm" class="panel" hidden>
+        <div class="divider">Configuração inicial</div>
+        <p class="sub">Só aparece quando ainda não existe administrador. Use a chave configurada no servidor.</p>
+        <div class="field"><label for="setupAdminKey">Chave de configuração</label><input id="setupAdminKey" type="password" autocomplete="off" required></div>
+        <div class="field"><label for="setupAdminName">Nome</label><input id="setupAdminName" maxlength="120" required></div>
+        <div class="field"><label for="setupAdminEmail">E-mail</label><input id="setupAdminEmail" type="email" required></div>
+        <div class="field"><label for="setupAdminPassword">Senha (mínimo de 8 caracteres)</label><input id="setupAdminPassword" type="password" minlength="8" autocomplete="new-password" required></div>
+        <button class="primary" type="submit">Criar administrador</button>
+        <p class="message" id="setupAdminMessage" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+    <p class="note">Acesso privado do Beiçola F.I. · Não compartilhe sua senha.</p>
+  </main>
+  <script src="js/login.js" defer></script>
+</body>
+</html>
