@@ -3188,12 +3188,34 @@ function cleanupExpiredSessions() {
 }
 
 // ======================================================
-// FRONTEND
+// FRONTEND E PROTEÇÃO DE PÁGINAS
 // ======================================================
+
+// Estas rotas vêm antes do express.static para que /index.html
+// não seja servido diretamente a quem não tem sessão válida.
+app.get(["/", "/index.html"], (req, res) => {
+    if (!getSessionUser(req)) {
+        const resetToken = req.query.reset_token;
+        const destination = resetToken
+            ? `/login.html?reset_token=${encodeURIComponent(String(resetToken))}`
+            : "/login.html";
+        return res.redirect(302, destination);
+    }
+
+    return res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+});
+
+app.get("/login.html", (req, res) => {
+    if (getSessionUser(req)) {
+        return res.redirect(302, "/index.html");
+    }
+
+    return res.sendFile(path.join(FRONTEND_DIR, "login.html"));
+});
 
 app.use(
     express.static(FRONTEND_DIR, {
-        extensions: ["html"]
+        index: false
     })
 );
 
@@ -3202,12 +3224,17 @@ app.use((req, res, next) => {
         return next();
     }
 
-    res.sendFile(
-        path.join(
-            FRONTEND_DIR,
-            "index.html"
-        )
-    );
+    if (req.method !== "GET") {
+        return next();
+    }
+
+    // Rotas de páginas desconhecidas também não entregam o painel
+    // para visitantes sem sessão. Arquivos estáticos já foram tratados acima.
+    if (getSessionUser(req)) {
+        return res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+    }
+
+    return res.redirect(302, "/login.html");
 });
 
 // ======================================================
