@@ -1,13 +1,15 @@
-
 <!DOCTYPE html>
 
 <html lang="pt-BR">
 
-<head> <meta charset="UTF-8">
+<head>
+    <meta charset="UTF-8">
+
 
 <meta
-name="viewport"
-content="width=device-width, initial-scale=1.0"
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
 <title>Beiçola F.I. — Área do Time</title>
 
@@ -16,7 +18,6 @@ content="width=device-width, initial-scale=1.0"
 </head>
 
 <body>
-
 <!-- =====================================================
      APLICAÇÃO
 ====================================================== -->
@@ -46,7 +47,7 @@ content="width=device-width, initial-scale=1.0"
 
         <nav class="sidebar-nav">
 
-            <button
+            <button type="button"
                 class="nav-button active"
                 data-page="inicio"
             >
@@ -55,7 +56,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="elenco"
             >
@@ -64,7 +65,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="escalacao"
             >
@@ -73,7 +74,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="partidas"
             >
@@ -82,7 +83,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="enquetes"
             >
@@ -91,7 +92,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="avisos"
             >
@@ -100,7 +101,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="mensagens"
             >
@@ -114,7 +115,7 @@ content="width=device-width, initial-scale=1.0"
 
             <!-- SOMENTE ADMIN -->
 
-            <button
+            <button type="button"
                 class="nav-button admin-only"
                 data-page="admin"
             >
@@ -123,7 +124,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button admin-only"
                 data-page="gerenciar-jogadores"
             >
@@ -132,7 +133,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 class="nav-button admin-only"
                 data-page="montar-escalacao"
             >
@@ -145,7 +146,7 @@ content="width=device-width, initial-scale=1.0"
 
         <div class="sidebar-bottom">
 
-            <button
+            <button type="button"
                 class="nav-button"
                 data-page="perfil"
             >
@@ -154,7 +155,7 @@ content="width=device-width, initial-scale=1.0"
             </button>
 
 
-            <button
+            <button type="button"
                 id="logoutButton"
                 class="nav-button logout-button"
             >
@@ -180,7 +181,7 @@ content="width=device-width, initial-scale=1.0"
         <header class="topbar">
 
             <div class="mobile-menu">
-                <button id="mobileMenuButton">
+                <button type="button" id="mobileMenuButton" aria-label="Abrir menu">
                     ☰
                 </button>
             </div>
@@ -336,7 +337,7 @@ content="width=device-width, initial-scale=1.0"
                             </h2>
                         </div>
 
-                        <button
+                        <button type="button"
                             class="outline-button"
                             data-page="partidas"
                         >
@@ -373,7 +374,7 @@ content="width=device-width, initial-scale=1.0"
                             </h2>
                         </div>
 
-                        <button
+                        <button type="button"
                             class="outline-button"
                             data-page="escalacao"
                         >
@@ -414,7 +415,7 @@ content="width=device-width, initial-scale=1.0"
 
                         </div>
 
-                        <button
+                        <button type="button"
                             class="outline-button"
                             data-page="avisos"
                         >
@@ -839,7 +840,7 @@ content="width=device-width, initial-scale=1.0"
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="pollQuestion">
                                 Pergunta
                             </label>
 
@@ -855,7 +856,7 @@ content="width=device-width, initial-scale=1.0"
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="pollOptions">
                                 Opções
                             </label>
 
@@ -872,7 +873,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="pollCloseDate">
                                     Data de encerramento
                                 </label>
 
@@ -979,7 +980,7 @@ content="width=device-width, initial-scale=1.0"
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="announcementTitle">
                                 Título
                             </label>
 
@@ -994,7 +995,7 @@ content="width=device-width, initial-scale=1.0"
 
                         <div class="form-group">
 
-                            <label>
+                            <label for="announcementContent">
                                 Mensagem
                             </label>
 
@@ -1178,7 +1179,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="profileNameInput">
                                     Nome
                                 </label>
 
@@ -1193,7 +1194,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="profileEmailInput">
                                     E-mail
                                 </label>
 
@@ -1241,7 +1242,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="currentPassword">
                                     Senha atual
                                 </label>
 
@@ -1256,7 +1257,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="newPassword">
                                     Nova senha
                                 </label>
 
@@ -1272,7 +1273,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="confirmNewPassword">
                                     Confirmar nova senha
                                 </label>
 
@@ -1345,7 +1346,7 @@ content="width=device-width, initial-scale=1.0"
                             números, status e instruções.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="gerenciar-jogadores"
                         >
@@ -1370,7 +1371,7 @@ content="width=device-width, initial-scale=1.0"
                             formação personalizada.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="montar-escalacao"
                         >
@@ -1394,7 +1395,7 @@ content="width=device-width, initial-scale=1.0"
                             Crie votações para os integrantes do time.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="enquetes"
                         >
@@ -1418,7 +1419,7 @@ content="width=device-width, initial-scale=1.0"
                             Veja e responda às mensagens dos integrantes.
                         </p>
 
-                        <button
+                        <button type="button"
                             class="primary-button"
                             data-page="mensagens"
                         >
@@ -1461,7 +1462,7 @@ content="width=device-width, initial-scale=1.0"
                     </div>
 
 
-                    <button
+                    <button type="button"
                         id="addPlayerButton"
                         class="primary-button"
                     >
@@ -1577,7 +1578,7 @@ content="width=device-width, initial-scale=1.0"
                     </div>
 
 
-                    <button
+                    <button type="button"
                         id="saveLineupButton"
                         class="primary-button"
                     >
@@ -1610,35 +1611,35 @@ content="width=device-width, initial-scale=1.0"
 
                     <div class="formation-controls">
 
-                        <button
+                        <button type="button"
                             class="formation-button active"
                             data-formation="2-2"
                         >
                             2-2
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="1-2-1"
                         >
                             1-2-1
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="3-1"
                         >
                             3-1
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="1-3"
                         >
                             1-3
                         </button>
 
-                        <button
+                        <button type="button"
                             class="formation-button"
                             data-formation="personalizada"
                         >
@@ -1657,7 +1658,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="formationDefenders">
                                     Defensores
                                 </label>
 
@@ -1674,7 +1675,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="formationWings">
                                     Alas
                                 </label>
 
@@ -1691,7 +1692,7 @@ content="width=device-width, initial-scale=1.0"
 
                             <div class="form-group">
 
-                                <label>
+                                <label for="formationPivots">
                                     Pivôs
                                 </label>
 
@@ -1993,9 +1994,10 @@ content="width=device-width, initial-scale=1.0"
             </div>
 
 
-            <button
+            <button type="button"
                 class="modal-close"
                 id="closePlayerModal"
+                aria-label="Fechar janela de jogador"
             >
                 ×
             </button>
@@ -2015,7 +2017,7 @@ content="width=device-width, initial-scale=1.0"
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerName">
                         Nome
                     </label>
 
@@ -2030,7 +2032,7 @@ content="width=device-width, initial-scale=1.0"
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerNumber">
                         Número da camisa
                     </label>
 
@@ -2050,7 +2052,7 @@ content="width=device-width, initial-scale=1.0"
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerPrimaryPosition">
                         Posição principal
                     </label>
 
@@ -2090,7 +2092,7 @@ content="width=device-width, initial-scale=1.0"
 
                 <div class="form-group">
 
-                    <label>
+                    <label for="playerSecondaryPosition">
                         Posição secundária
                     </label>
 
@@ -2131,7 +2133,7 @@ content="width=device-width, initial-scale=1.0"
 
             <div class="form-group">
 
-                <label>
+                <label for="playerStatus">
                     Status
                 </label>
 
@@ -2164,7 +2166,7 @@ content="width=device-width, initial-scale=1.0"
 
             <div class="form-group">
 
-                <label>
+                <label for="playerPhoto">
                     Foto do jogador
                 </label>
 
@@ -2183,7 +2185,7 @@ content="width=device-width, initial-scale=1.0"
 
             <div class="form-group">
 
-                <label>
+                <label for="playerInstructions">
                     Instruções individuais
                 </label>
 
