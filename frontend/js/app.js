@@ -8,8 +8,27 @@
    UTILITÁRIOS DOM
 ========================================================= */
 
-const $ = (selector) =>
-  document.querySelector(selector);
+const SELECTOR_ALIASES = {
+  "#playersList": "#playersGrid",
+  "#headerUserName": "#currentUserName",
+  "#headerUserRole": "#currentUserRole",
+  "#captainName": "#currentCaptain",
+  "#freeKickPlayers": "#freeKickTakers",
+  "#penaltyPlayers": "#penaltyTakers",
+  "#lineupEditor": "#adminLineupEditor",
+  "#newPlayerButton": "#addPlayerButton",
+  "#cancelPlayerButton": "#cancelPlayerModal",
+  "#playerId": "#editingPlayerId",
+  "#playerSecondaryPositions": "#playerSecondaryPosition",
+  "#profileEmail": "#profileEmailInput"
+};
+
+const $ = (selector) => {
+  const direct = document.querySelector(selector);
+  if (direct) return direct;
+  const alias = SELECTOR_ALIASES[selector];
+  return alias ? document.querySelector(alias) : null;
+};
 
 const $$ = (selector) =>
   [...document.querySelectorAll(selector)];
@@ -721,401 +740,134 @@ $("#logoutButton")
 ========================================================= */
 
 function setupNavigation() {
+  const titles = {
+    inicio: "Início", elenco: "Elenco", escalacao: "Escalação",
+    partidas: "Partidas", enquetes: "Enquetes", avisos: "Avisos",
+    mensagens: "Mensagens", perfil: "Meu perfil", admin: "Administração",
+    "gerenciar-jogadores": "Gerenciar jogadores",
+    "montar-escalacao": "Montar escalação"
+  };
 
-  $$(".nav-button")
-    .forEach(button => {
+  async function openPage(page) {
+    const target = document.querySelector(`#page-${page}`);
+    if (!target) return;
+    if (["admin", "gerenciar-jogadores", "montar-escalacao"].includes(page) && me?.role !== "admin") return;
 
-      button.addEventListener(
-        "click",
-        async () => {
+    $$(".page").forEach(section => section.classList.toggle("active", section === target));
+    $$(".nav-button[data-page]").forEach(button => button.classList.toggle("active", button.dataset.page === page));
+    const title = $("#pageTitle");
+    if (title) title.textContent = titles[page] || page;
+    const sidebar = $(".sidebar");
+    sidebar?.classList.remove("open");
 
-          const section =
-            button.dataset.section;
+    try {
+      if (page === "inicio") await loadDashboard();
+      else if (page === "elenco" || page === "gerenciar-jogadores") { await loadPlayers(); if (me?.role === "admin") await loadMembers(); await loadRoles(); }
+      else if (page === "escalacao" || page === "montar-escalacao") { await loadLineup(); await loadMatchLineup(); }
+      else if (page === "partidas") await loadMatches();
+      else if (page === "enquetes") await loadPolls();
+      else if (page === "avisos") await loadAnnouncements();
+      else if (page === "perfil") loadProfile();
+      else if (page === "admin" && me?.role === "admin") { await loadMembers(); await loadPlayers(); }
+    } catch (error) { console.error("Falha ao abrir a seção:", error); }
+  }
 
-          if (!section) return;
-
-
-          $$(".nav-button")
-            .forEach(item => {
-
-              item.classList
-                .remove("active");
-
-            });
-
-
-          button.classList
-            .add("active");
-
-
-          $$(".app-section")
-            .forEach(item => {
-
-              item.classList
-                .add("hidden");
-
-            });
-
-
-          const target =
-            $(`#section-${section}`);
-
-          target
-            ?.classList
-            .remove("hidden");
-
-
-          switch (section) {
-
-            case "dashboard":
-
-              await loadDashboard();
-
-              break;
-
-
-            case "players":
-
-              await loadPlayers();
-
-              await loadRoles();
-
-              break;
-
-
-            case "lineup":
-
-              await loadLineup();
-
-              await loadMatchLineup();
-
-              break;
-
-
-            case "polls":
-
-              await loadPolls();
-
-              break;
-
-
-            case "matches":
-
-              await loadMatches();
-
-              break;
-
-
-            case "announcements":
-
-              await loadAnnouncements();
-
-              break;
-
-
-            case "profile":
-
-              loadProfile();
-
-              break;
-
-
-            case "admin":
-
-              if (
-                me?.role === "admin"
-              ) {
-
-                await loadMembers();
-
-                await checkAdminSetup();
-
-              }
-
-              break;
-
-          }
-
-        }
-      );
-
-    });
+  $$(".nav-button[data-page]").forEach(button => {
+    button.addEventListener("click", () => openPage(button.dataset.page));
+  });
+  $$('[data-page]').filter(el => !el.classList.contains('nav-button')).forEach(button => {
+    button.addEventListener("click", () => openPage(button.dataset.page));
+  });
+  $("#mobileMenuButton")?.addEventListener("click", () => $(".sidebar")?.classList.toggle("open"));
+  window.openBeiçolaPage = openPage;
 }
-
 
 /* =========================================================
    CARREGAR APLICAÇÃO
 ========================================================= */
 
 async function loadApp() {
-
   try {
+    const data = await api("/api/me");
+    me = data.user || data;
 
-    const data =
-      await api("/api/me");
+    if ($("#currentUserName")) $("#currentUserName").textContent = me.name || "Integrante";
+    if ($("#currentUserRole")) $("#currentUserRole").textContent = me.role === "admin" ? "Administrador" : "Integrante";
+    if ($("#currentUserAvatar")) $("#currentUserAvatar").textContent = (me.name || "?").trim().charAt(0).toUpperCase();
+    if ($("#welcomeName")) $("#welcomeName").textContent = me.name || "Integrante";
 
-    me =
-      data.user ||
-      data;
+    $$(".admin-only").forEach(element => { element.classList.toggle("hidden", me.role !== "admin"); });
 
-
-    $("#authScreen")
-      ?.classList
-      .add("hidden");
-
-    $("#appScreen")
-      ?.classList
-      .remove("hidden");
-
-
-    if (
-      $("#headerUserName")
-    ) {
-
-      $("#headerUserName")
-        .textContent =
-        me.name || "";
-
-    }
-
-
-    if (
-      $("#headerUserRole")
-    ) {
-
-      $("#headerUserRole")
-        .textContent =
-        me.role === "admin"
-          ? "Administrador"
-          : "Integrante";
-
-    }
-
-
-    $$(".admin-only")
-      .forEach(element => {
-
-        element.classList.toggle(
-          "hidden",
-          me.role !== "admin"
-        );
-
-      });
-
-
-    await Promise.all([
-
-      loadPlayers(),
-
-      loadMatches(),
-
-      loadPolls(),
-
-      loadAnnouncements(),
-
-      loadRoles(),
-
-      loadLineup(),
-
-      loadMembers()
-
-    ]);
-
-
+    await Promise.all([loadPlayers(), loadMatches(), loadPolls(), loadAnnouncements(), loadRoles(), loadLineup(), loadMembers()]);
     await loadMatchLineup();
-
     loadProfile();
-
-
-    const dashboardButton =
-      $('.nav-button[data-section="dashboard"]');
-
-    if (dashboardButton) {
-
-      dashboardButton.click();
-
-    }
-
-
-  } catch {
-
-    $("#authScreen")
-      ?.classList
-      .remove("hidden");
-
-    $("#appScreen")
-      ?.classList
-      .add("hidden");
-
-
-    await checkAdminSetup();
-
+    const start = document.querySelector('.nav-button[data-page="inicio"]');
+    if (start) start.click();
+    else $$(".page").forEach(section => section.classList.toggle("active", section.id === "page-inicio"));
+  } catch (error) {
+    console.warn("Sessão ausente ou expirada; voltando ao login.");
+    window.location.replace("/login.html");
   }
 }
-
 
 /* =========================================================
    DASHBOARD
 ========================================================= */
 
 async function loadDashboard() {
-
   try {
-
-    const [
-      playersResponse,
-      matchesResponse,
-      pollsResponse,
-      announcementsResponse
-    ] = await Promise.all([
-
-      api("/api/players"),
-
-      api("/api/matches"),
-
-      api("/api/polls"),
-
-      api("/api/announcements")
-
+    const [playersResponse, matchesResponse, pollsResponse, announcementsResponse, lineupResponse] = await Promise.all([
+      api("/api/players"), api("/api/matches"), api("/api/polls"), api("/api/announcements"), api("/api/lineup")
     ]);
+    const players = extractList(playersResponse, "players");
+    const matches = extractList(matchesResponse, "matches");
+    const polls = extractList(pollsResponse, "polls");
+    const announcements = extractList(announcementsResponse, "announcements");
+    const lineup = extractList(lineupResponse, "lineup");
 
-
-    const players =
-      extractList(
-        playersResponse,
-        "players"
-      );
-
-
-    const matches =
-      extractList(
-        matchesResponse,
-        "matches"
-      );
-
-
-    const polls =
-      extractList(
-        pollsResponse,
-        "polls"
-      );
-
-
-    const announcements =
-      extractList(
-        announcementsResponse,
-        "announcements"
-      );
-
-
-    if ($("#welcomeName")) {
-
-      $("#welcomeName")
-        .textContent =
-        me?.name ||
-        "Integrante";
-
+    if ($("#welcomeName")) $("#welcomeName").textContent = me?.name || "Integrante";
+    if ($("#statPlayers")) $("#statPlayers").textContent = String(players.length);
+    if ($("#statPolls")) {
+      const openPolls = polls.filter(poll => !poll.closes_at || new Date(poll.closes_at) > new Date());
+      $("#statPolls").textContent = String(openPolls.length);
     }
+    if ($("#statRole")) $("#statRole").textContent = me?.role === "admin" ? "Administrador" : "Integrante";
 
+    const upcoming = matches.filter(match => {
+      const date = match.match_date || match.date;
+      return date && new Date(date) >= new Date();
+    }).sort((a, b) => new Date(a.match_date || a.date) - new Date(b.match_date || b.date))[0];
 
-    if ($("#dashboardPlayers")) {
-
-      $("#dashboardPlayers")
-        .textContent =
-        players.length;
-
+    if ($("#statNextMatch")) {
+      $("#statNextMatch").textContent = upcoming
+        ? `${upcoming.opponent} · ${formatDate(upcoming.match_date || upcoming.date)}`
+        : "—";
     }
-
-
-    if ($("#dashboardMatches")) {
-
-      $("#dashboardMatches")
-        .textContent =
-        matches.length;
-
+    if ($("#nextMatch")) {
+      $("#nextMatch").innerHTML = upcoming ? `
+        <article class="match-card">
+          <h3>Beiçola F.I. <span>vs.</span> ${esc(upcoming.opponent)}</h3>
+          <p class="muted">${formatDate(upcoming.match_date || upcoming.date)}${upcoming.location ? ` · ${esc(upcoming.location)}` : ""}</p>
+          ${upcoming.result ? `<strong>Resultado: ${esc(upcoming.result)}</strong>` : ""}
+          ${upcoming.notes ? `<p>${esc(upcoming.notes)}</p>` : ""}
+        </article>` : '<div class="empty-state">Nenhuma partida futura cadastrada.</div>';
     }
-
-
-    if ($("#dashboardPolls")) {
-
-      $("#dashboardPolls")
-        .textContent =
-        polls.length;
-
+    if ($("#homeLineup")) {
+      const starters = lineup.filter(item => item.status === "titular");
+      $("#homeLineup").innerHTML = starters.length ? starters.map(item => `
+        <div class="mini-lineup-item"><strong>${esc(item.position || "Titular")}</strong><span>${esc(item.player_name || "Jogador")}</span></div>
+      `).join("") : '<div class="empty-state">A escalação ainda não foi definida.</div>';
     }
-
-
-    if (
-      $("#dashboardAnnouncements")
-    ) {
-
-      $("#dashboardAnnouncements")
-        .textContent =
-        announcements.length;
-
+    if ($("#homeAnnouncements")) {
+      const latest = announcements.slice(0, 3);
+      $("#homeAnnouncements").innerHTML = latest.length ? latest.map(item => `
+        <article class="announcement-card"><h3>${esc(item.title)}</h3><p>${esc(item.content)}</p><small>${formatDate(item.created_at)}</small></article>
+      `).join("") : '<div class="empty-state">Nenhum aviso publicado.</div>';
     }
-
-
-    const nextMatch =
-      [...matches]
-        .filter(match => {
-
-          const date =
-            match.match_date ||
-            match.date;
-
-          if (!date) return false;
-
-          return (
-            new Date(date) >=
-            new Date()
-          );
-
-        })
-        .sort((a, b) => {
-
-          const dateA =
-            a.match_date ||
-            a.date;
-
-          const dateB =
-            b.match_date ||
-            b.date;
-
-          return (
-            new Date(dateA) -
-            new Date(dateB)
-          );
-
-        })[0];
-
-
-    if (
-      $("#dashboardNextMatch")
-    ) {
-
-      $("#dashboardNextMatch")
-        .textContent =
-        nextMatch
-          ? `vs. ${nextMatch.opponent} — ${formatDate(
-              nextMatch.match_date ||
-              nextMatch.date
-            )}`
-          : "Nenhuma partida próxima.";
-
-    }
-
-
   } catch (error) {
-
-    console.error(
-      "Erro no dashboard:",
-      error
-    );
-
+    console.error("Erro no painel inicial:", error);
   }
 }
-
 
 /* =========================================================
    JOGADORES
@@ -1495,7 +1247,7 @@ $("#playerForm")
 
 
       const message =
-        $("#playerFormMessage");
+        ensureFeedback($("#playerForm"), "playerFormMessage");
 
 
       const secondary =
@@ -3791,7 +3543,7 @@ function ensurePollOptions() {
   const container =
     $("#pollOptions");
 
-  if (!container) return;
+  if (!container || container.tagName === "TEXTAREA") return;
 
 
   if (
@@ -4591,12 +4343,11 @@ function loadProfile() {
   if (!me) return;
 
 
-  if ($("#profileName")) {
-
-    $("#profileName")
-      .value =
-      me.name || "";
-
+  if ($("#profileNameInput")) {
+    $("#profileNameInput").value = me.name || "";
+  }
+  if (document.querySelector("#profileName")) {
+    document.querySelector("#profileName").textContent = me.name || "—";
   }
 
 
@@ -4611,11 +4362,8 @@ function loadProfile() {
 
   if ($("#profileRole")) {
 
-    $("#profileRole")
-      .value =
-      me.role === "admin"
-        ? "Administrador"
-        : "Integrante";
+    $("#profileRole").textContent =
+      me.role === "admin" ? "Administrador" : "Integrante";
 
   }
 
@@ -4642,7 +4390,7 @@ $("#profileForm")
                 JSON.stringify({
 
                   name:
-                    $("#profileName")
+                    $("#profileNameInput")
                       .value
                       .trim()
 
@@ -4657,7 +4405,7 @@ $("#profileForm")
             ...me,
 
             name:
-              $("#profileName")
+              $("#profileNameInput")
                 .value
                 .trim()
 
@@ -5119,6 +4867,68 @@ $("#setupAdminForm")
     }
   );
 
+
+/* =========================================================
+   ADAPTAÇÃO DOS FORMULÁRIOS DO HTML ATUAL
+========================================================= */
+
+function ensureFeedback(form, id) {
+  let el = document.getElementById(id);
+  if (!el && form) {
+    el = document.createElement("p");
+    el.id = id;
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    form.appendChild(el);
+  }
+  return el;
+}
+
+$("#createPollForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (me?.role !== "admin") return;
+  const form = event.currentTarget;
+  const feedback = ensureFeedback(form, "pollMessage");
+  const options = $("#pollOptions").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (options.length < 2) return showMessage(feedback, "Informe pelo menos duas opções.");
+  try {
+    await api("/api/polls", { method: "POST", body: JSON.stringify({
+      question: $("#pollQuestion").value.trim(),
+      options,
+      closes_at: $("#pollCloseDate").value || null,
+      multiple_choice: $("#pollMultiple").checked
+    }) });
+    form.reset();
+    showMessage(feedback, "Enquete criada.", true);
+    await loadPolls();
+  } catch (error) { showMessage(feedback, error.message); }
+});
+
+$("#announcementForm")?.addEventListener("submit", async event => {
+  // O listener legado já faz o envio; este handler só cria uma mensagem
+  // acessível caso o formulário não tenha recebido feedback ainda.
+  ensureFeedback(event.currentTarget, "announcementMessage");
+});
+
+$("#messageForm")?.addEventListener("submit", event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const feedback = ensureFeedback(form, "messageFeatureNotice");
+  showMessage(feedback, "O recurso de mensagens ainda não está conectado ao backend; sua mensagem não foi enviada.");
+});
+
+$("#changePasswordForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const feedback = ensureFeedback(form, "passwordMessage");
+  const next = $("#newPassword").value;
+  if (next !== $("#confirmNewPassword").value) return showMessage(feedback, "As novas senhas não coincidem.");
+  try {
+    const data = await api("/api/change-password", { method: "POST", body: JSON.stringify({ currentPassword: $("#currentPassword").value, newPassword: next }) });
+    showMessage(feedback, data.message || "Senha alterada.", true);
+    form.reset();
+  } catch (error) { showMessage(feedback, error.message); }
+});
 
 /* =========================================================
    INICIALIZAÇÃO
