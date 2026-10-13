@@ -592,7 +592,24 @@ function requireAdmin(req, res, next) {
 
     next();
 }
+function requireStaff(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({
+            error: "Não autenticado."
+        });
+    }
 
+    if (
+        req.user.role !== "admin" &&
+        req.user.role !== "coach"
+    ) {
+        return res.status(403).json({
+            error: "Apenas o administrador ou treinador pode fazer isso."
+        });
+    }
+
+    next();
+}
 // ======================================================
 // E-MAIL
 // ======================================================
