@@ -3210,48 +3210,51 @@ function cleanupExpiredSessions() {
 
 // Estas rotas vêm antes do express.static para que /index.html
 // não seja servido diretamente a quem não tem sessão válida.
+function redirectForUser(user, res) {
+    if (user.role === "admin" || user.role === "coach") {
+        return res.redirect(302, "/index.html");
+    }
+
+    return res.redirect(302, "/player.html");
+}
+
 app.get(["/", "/index.html"], (req, res) => {
-    if (!getSessionUser(req)) {
+    const user = getSessionUser(req);
+
+    if (!user) {
         const resetToken = req.query.reset_token;
         const destination = resetToken
             ? `/login.html?reset_token=${encodeURIComponent(String(resetToken))}`
             : "/login.html";
+
         return res.redirect(302, destination);
     }
 
-    return res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+    return redirectForUser(user, res);
 });
 
-app.get("/login.html", (req, res) => {
-    if (getSessionUser(req)) {
+app.get("/player.html", (req, res) => {
+    const user = getSessionUser(req);
+
+    if (!user) {
+        return res.redirect(302, "/login.html");
+    }
+
+    if (user.role === "admin" || user.role === "coach") {
         return res.redirect(302, "/index.html");
     }
 
-    return res.sendFile(path.join(FRONTEND_DIR, "login.html"));
+    return res.sendFile(path.join(FRONTEND_DIR, "player.html"));
 });
 
-app.use(
-    express.static(FRONTEND_DIR, {
-        index: false
-    })
-);
+app.get("/login.html", (req, res) => {
+    const user = getSessionUser(req);
 
-app.use((req, res, next) => {
-    if (req.path.startsWith("/api/")) {
-        return next();
+    if (user) {
+        return redirectForUser(user, res);
     }
 
-    if (req.method !== "GET") {
-        return next();
-    }
-
-    // Rotas de páginas desconhecidas também não entregam o painel
-    // para visitantes sem sessão. Arquivos estáticos já foram tratados acima.
-    if (getSessionUser(req)) {
-        return res.sendFile(path.join(FRONTEND_DIR, "index.html"));
-    }
-
-    return res.redirect(302, "/login.html");
+    return res.sendFile(path.join(FRONTEND_DIR, "login.html"));
 });
 
 // ======================================================
